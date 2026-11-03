@@ -1,0 +1,98 @@
+# Pruebas automáticas de un módulo PHP (el mismo archivo en Backend, Inventario, Pacientes,
+# Adopciones y Reportes).
+#
+# Corre en cada push a cualquier rama, en cada pull request hacia dev o main y, por lo tanto,
+# también después de cada merge (que es un push a dev o a main).
+# Las reglas de los repos exigen que el chequeo "pruebas" pase para poder mergear a dev y a main.
+
+name: Pruebas
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [dev, main]
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # MySQL de prueba, igual al del perfil "local" de Docker Compose (puerto 3307, base huellavet_test).
+    # Las pruebas de la base lo usan; nunca se conectan a Aiven.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: pruebas
+          MYSQL_DATABASE: huellavet_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ppruebas --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      TEST_DB_PASSWORD: pruebas
+      COMUN_DIR: ${{ github.workspace }}/gateway/comun
+
+    steps:
+      # A main solo se llega desde dev: un pull request de otra rama hacia main falla acá.
+      - name: A main solo se mergea desde dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'dev'
+        env:
+          RAMA_ORIGEN: ${{ github.head_ref }}
+        run: |
+          echo "::error::A main solo se mergea desde dev. Este pull request viene de '$RAMA_ORIGEN': cambiá la base a dev."
+          exit 1
+
+      - name: Bajar el código del módulo
+        uses: actions/checkout@v4
+
+      # Los módulos usan comun/ (y Backend, las migraciones de base/) del repo ApiGateway.
+      # Se usa la rama del Gateway que corresponde: main para lo que va a producción, dev para lo demás.
+      - name: Bajar comun/ y base/ del Gateway
+        run: |
+          RAMA=dev
+          if [ "${GITHUB_BASE_REF:-$GITHUB_REF_NAME}" = "main" ]; then RAMA=main; fi
+          URL=https://github.com/romeroppau/PAW--ApiGateway--TPIntegrador.git
+          git clone --quiet --depth 1 --branch "$RAMA" "$URL" gateway \
+            || git clone --quiet --depth 1 --branch main "$URL" gateway
+          echo "Gateway: $(git -C gateway branch --show-current)"
+
+      - name: Instalar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql
+          coverage: none
+          tools: composer
+
+      - name: Sintaxis de los archivos PHP
+        run: |
+          find . -path ./gateway -prune -o -path ./vendor -prune -o -name '*.php' -print0 \
+            | xargs -0 -r -n1 php -l
+
+      # Todo lo que está antes de <?php PHP lo manda como respuesta, y después ya no puede poner
+      # el código de estado (un 404 sale como 200 y como HTML). Pasó con el esqueleto de Pacientes.
+      - name: Los archivos PHP empiezan con <?php
+        run: |
+          fallas=0
+          while IFS= read -r -d '' archivo; do
+            if [ "$(head -c 5 "$archivo")" != "<?php" ]; then
+              echo "::error file=$archivo::Tiene algo antes de <?php (una línea en blanco, espacios o BOM). Tiene que empezar exactamente con <?php"
+              fallas=1
+            fi
+          done < <(find . -path ./gateway -prune -o -path ./vendor -prune -o -name '*.php' -print0)
+          exit $fallas
+
+      - name: Pruebas PHPUnit
+        run: |
+          if ! find tests -name '*Test.php' 2>/dev/null | grep -q .; then
+            echo "Este módulo todavía no tiene pruebas (tests/*Test.php)."
+            exit 0
+          fi
+          composer install --no-interaction --no-progress
+          vendor/bin/phpunit --testdox
