@@ -207,6 +207,95 @@ class AdopcionRepositorio
         });
     }
 
+    // El rescatista edita su publicación activa. Solo cambian los campos que vienen.
+    // Una publicación rechazada que se edita vuelve a PENDIENTE (sin motivo); una aprobada sigue aprobada.
+    // Devuelve OK, NO_EXISTE, INACTIVA u OTRA_ABIERTA (la mascota ya se volvió a publicar).
+    public function editarPublicacion(int $id, int $rescatistaId, array $datos): string
+    {
+        return $this->enTransaccion(function () use ($id, $rescatistaId, $datos): string {
+            $publicacion = $this->fila(
+                'SELECT estado_moderacion, activa, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE',
+                [$id]
+            );
+
+            if ($publicacion === null || (int) $publicacion['rescatista_id'] !== $rescatistaId) {
+                return 'NO_EXISTE';
+            }
+
+            if ((int) $publicacion['activa'] !== 1) {
+                return 'INACTIVA';
+            }
+
+            $columnas = [];
+            $valores = [];
+
+            foreach (['titulo', 'descripcion'] as $campo) {
+                if (array_key_exists($campo, $datos)) {
+                    $columnas[] = "$campo = ?";
+                    $valores[] = [$datos[$campo], PDO::PARAM_STR];
+                }
+            }
+
+            if (array_key_exists('foto', $datos)) {
+                $columnas[] = 'foto = ?';
+                $valores[] = [$datos['foto'][0], PDO::PARAM_LOB];
+                $columnas[] = 'foto_tipo = ?';
+                $valores[] = [$datos['foto'][1], PDO::PARAM_STR];
+            }
+
+            if ($publicacion['estado_moderacion'] === 'RECHAZADA') {
+                $columnas[] = "estado_moderacion = 'PENDIENTE'";
+                $columnas[] = 'motivo_rechazo = NULL';
+            }
+
+            $consulta = $this->db->prepare('UPDATE publicacion SET ' . implode(', ', $columnas) . ' WHERE id = ?');
+            foreach ($valores as $indice => [$valor, $tipo]) {
+                $consulta->bindValue($indice + 1, $valor, $tipo);
+            }
+            $consulta->bindValue(count($valores) + 1, $id, PDO::PARAM_INT);
+
+            try {
+                $consulta->execute();
+            } catch (PDOException $error) {
+                // Volver a PENDIENTE la reabre: si la mascota ya tiene otra publicación abierta, no se puede.
+                // MySQL deshace solo esa sentencia (que era la única), así que confirmar no cambia nada.
+                if (self::esDuplicado($error)) {
+                    return 'OTRA_ABIERTA';
+                }
+                throw $error;
+            }
+
+            return 'OK';
+        });
+    }
+
+    // El rescatista da de baja su publicación (baja lógica). Si tenía una adopción en curso, se cancela
+    // igual que con "Cancelar". Devuelve OK, NO_EXISTE o INACTIVA.
+    public function darDeBaja(int $id, int $rescatistaId, string $ahora): string
+    {
+        return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string {
+            $publicacion = $this->fila('SELECT activa, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE', [$id]);
+
+            if ($publicacion === null || (int) $publicacion['rescatista_id'] !== $rescatistaId) {
+                return 'NO_EXISTE';
+            }
+
+            if ((int) $publicacion['activa'] !== 1) {
+                return 'INACTIVA';
+            }
+
+            $adopcion = $this->fila('SELECT id, estado FROM adopcion WHERE publicacion_id = ? FOR UPDATE', [$id]);
+
+            if ($adopcion !== null && !in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
+                $this->cerrarCancelada((int) $adopcion['id'], $id, $ahora);
+            } else {
+                $this->ejecutar('UPDATE publicacion SET activa = 0 WHERE id = ?', [$id]);
+            }
+
+            return 'OK';
+        });
+    }
+
     // ---------- Adopciones ----------
 
     public function adopcion(int $id): ?array
@@ -432,15 +521,22 @@ class AdopcionRepositorio
                 return 'ESTADO';
             }
 
-            $this->ejecutar("UPDATE adopcion SET estado = 'CANCELADA', fecha_fin = ? WHERE id = ?", [$ahora, $adopcionId]);
-            $this->ejecutar('UPDATE publicacion SET activa = 0 WHERE id = ?', [(int) $adopcion['publicacion_id']]);
-            $this->ejecutar(
-                "UPDATE postulacion SET estado = 'RECHAZADA' WHERE adopcion_id = ? AND estado IN ('PENDIENTE', 'ELEGIDA')",
-                [$adopcionId]
-            );
+            $this->cerrarCancelada($adopcionId, (int) $adopcion['publicacion_id'], $ahora);
 
             return 'OK';
         });
+    }
+
+    // La adopción CANCELADA, la publicación cerrada y las postulaciones abiertas rechazadas
+    // (dentro de la transacción de quien la llama).
+    private function cerrarCancelada(int $adopcionId, int $publicacionId, string $ahora): void
+    {
+        $this->ejecutar("UPDATE adopcion SET estado = 'CANCELADA', fecha_fin = ? WHERE id = ?", [$ahora, $adopcionId]);
+        $this->ejecutar('UPDATE publicacion SET activa = 0 WHERE id = ?', [$publicacionId]);
+        $this->ejecutar(
+            "UPDATE postulacion SET estado = 'RECHAZADA' WHERE adopcion_id = ? AND estado IN ('PENDIENTE', 'ELEGIDA')",
+            [$adopcionId]
+        );
     }
 
     // ---------- Formato de las respuestas (contrato-adopciones.md) ----------

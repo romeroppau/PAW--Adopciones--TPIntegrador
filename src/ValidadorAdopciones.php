@@ -33,6 +33,35 @@ class ValidadorAdopciones
         return [$limpios, $errores];
     }
 
+    // PUT /api/adopciones/publicaciones/{id}: los mismos campos que al publicar menos mascota_id, todos
+    // opcionales (lo que no viene no cambia). Tiene que venir al menos uno.
+    public static function edicion(array $datos): array
+    {
+        $errores = [];
+        $limpios = [];
+
+        if (array_key_exists('titulo', $datos)) {
+            self::texto($datos, 'titulo', 3, 120, 'El título', $limpios, $errores);
+        }
+        if (array_key_exists('descripcion', $datos)) {
+            self::texto($datos, 'descripcion', 10, 2000, 'La descripción', $limpios, $errores);
+        }
+        if (array_key_exists('foto', $datos) && $datos['foto'] !== null && $datos['foto'] !== '') {
+            $foto = Imagen::desdeDataUrl($datos['foto']);
+            if (is_string($foto)) {
+                $errores['foto'] = $foto;
+            } else {
+                $limpios['foto'] = $foto;
+            }
+        }
+
+        if ($errores === [] && $limpios === []) {
+            $errores['titulo'] = 'Cambiá al menos el título, la descripción o la foto';
+        }
+
+        return [$limpios, $errores];
+    }
+
     // POST /api/adopciones/publicaciones/{id}/rechazar
     public static function motivo(array $datos): array
     {
