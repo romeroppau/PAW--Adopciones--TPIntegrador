@@ -86,6 +86,66 @@ class PublicacionControlador
         Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($repositorio->publicacion($id), true)], 201);
     }
 
+    // PUT /api/adopciones/publicaciones/{id} — el rescatista edita la suya (activa).
+    public static function editar(array $parametros): void
+    {
+        $sesion = Auth::requerirRol(['RESCATISTA']);
+        Auth::verificarCsrf($sesion);
+        $rescatistaId = (int) $sesion['id'];
+
+        $id = ParametroRuta::entero($parametros, 'id');
+        if ($id === null) {
+            Response::error('Publicación no encontrada', 404);
+            return;
+        }
+
+        [$datos, $errores] = ValidadorAdopciones::edicion(Request::json());
+        if ($errores !== []) {
+            Response::error('Revisá los datos de la publicación', 400, $errores);
+            return;
+        }
+
+        $repositorio = self::repositorio();
+
+        match ($repositorio->editarPublicacion($id, $rescatistaId, $datos)) {
+            'NO_EXISTE' => Response::error('Publicación no encontrada', 404),
+            'INACTIVA' => Response::error('La publicación ya no está activa', 409),
+            'OTRA_ABIERTA' => Response::error('La mascota ya tiene otra publicación abierta', 409),
+            default => self::respuestaPublicacion($repositorio, $id, "el rescatista $rescatistaId editó la publicación $id"),
+        };
+    }
+
+    // DELETE /api/adopciones/publicaciones/{id} — el rescatista da de baja la suya. Si tenía una
+    // adopción en curso, se cancela. 204 sin cuerpo.
+    public static function darDeBaja(array $parametros): void
+    {
+        $sesion = Auth::requerirRol(['RESCATISTA']);
+        Auth::verificarCsrf($sesion);
+        $rescatistaId = (int) $sesion['id'];
+
+        $id = ParametroRuta::entero($parametros, 'id');
+        $resultado = $id === null ? 'NO_EXISTE' : self::repositorio()->darDeBaja($id, $rescatistaId, date('Y-m-d H:i:s'));
+
+        if ($resultado === 'NO_EXISTE') {
+            Response::error('Publicación no encontrada', 404);
+            return;
+        }
+
+        if ($resultado === 'INACTIVA') {
+            Response::error('La publicación ya no está activa', 409);
+            return;
+        }
+
+        Logger::info("Adopciones: el rescatista $rescatistaId dio de baja la publicación $id");
+        http_response_code(204);
+    }
+
+    private static function respuestaPublicacion(AdopcionRepositorio $repositorio, int $id, string $evento): void
+    {
+        Logger::info("Adopciones: $evento");
+        Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($repositorio->publicacion($id), true)]);
+    }
+
     // GET /api/adopciones/mis-publicaciones — rescatista: todas las suyas.
     public static function mias(): void
     {

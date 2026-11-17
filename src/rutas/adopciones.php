@@ -7,6 +7,8 @@
 $router->get('/api/adopciones/publicaciones', [PublicacionControlador::class, 'listar']);
 $router->post('/api/adopciones/publicaciones', [PublicacionControlador::class, 'crear']);
 $router->get('/api/adopciones/publicaciones/{id}', [PublicacionControlador::class, 'ver']);
+$router->put('/api/adopciones/publicaciones/{id}', [PublicacionControlador::class, 'editar']);
+$router->delete('/api/adopciones/publicaciones/{id}', [PublicacionControlador::class, 'darDeBaja']);
 $router->get('/api/adopciones/publicaciones/{id}/foto', [PublicacionControlador::class, 'foto']);
 $router->post('/api/adopciones/publicaciones/{id}/aprobar', [PublicacionControlador::class, 'aprobar']);
 $router->post('/api/adopciones/publicaciones/{id}/rechazar', [PublicacionControlador::class, 'rechazar']);

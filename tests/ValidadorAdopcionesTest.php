@@ -37,6 +37,27 @@ final class ValidadorAdopcionesTest extends TestCase
         $this->assertSame(['mascota_id', 'titulo', 'descripcion', 'foto'], array_keys($errores));
     }
 
+    public function testAlEditarSoloSeValidaLoQueViene(): void
+    {
+        [$datos, $errores] = ValidadorAdopciones::edicion(['titulo' => ' Canela, lista para su familia ']);
+        $this->assertSame([], $errores);
+        $this->assertSame(['titulo' => 'Canela, lista para su familia'], $datos);
+
+        [, $errores] = ValidadorAdopciones::edicion(['descripcion' => 'corta']);
+        $this->assertSame(['descripcion'], array_keys($errores));
+
+        // Una foto vacía o null no cambia la foto: es lo mismo que no mandarla.
+        [, $errores] = ValidadorAdopciones::edicion(['foto' => null]);
+        $this->assertArrayHasKey('titulo', $errores);
+    }
+
+    public function testEditarSinNingunCampoDa400(): void
+    {
+        [, $errores] = ValidadorAdopciones::edicion(['mascota_id' => 901]);
+
+        $this->assertSame(['titulo'], array_keys($errores));
+    }
+
     public function testElMotivoDelRechazoTieneLargoMinimoYMaximo(): void
     {
         $this->assertArrayHasKey('motivo', ValidadorAdopciones::motivo(['motivo' => ' '])[1]);

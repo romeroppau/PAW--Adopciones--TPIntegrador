@@ -164,12 +164,23 @@ Respuestas:
 motivo, y las cerradas), de la más nueva a la más vieja.
 - 200: `{"publicaciones": [ ... ]}`
 
-### Editar y dar de baja (etapa 3)
-- `PUT /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Mismos campos que al publicar menos
-  `mascota_id`, todos opcionales (la foto que no viene no cambia). Una publicación rechazada que se
-  edita vuelve a `PENDIENTE` (sin motivo); una aprobada sigue aprobada. 409 si ya no está activa.
-- `DELETE /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Baja lógica (`activa = false`);
-  si tenía una adopción en curso, se cancela (ver "Cancelar"). 409 si ya no está activa.
+### Editar
+`PUT /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Mismos campos que al publicar menos
+`mascota_id`, todos opcionales: lo que no viene no cambia (una `foto` vacía o `null` tampoco). Tiene
+que venir al menos uno. Una publicación rechazada que se edita vuelve a `PENDIENTE` (sin motivo) y
+pasa otra vez por la moderación; una aprobada sigue aprobada.
+- 200: `{"publicacion": { ... }}`
+- 400: datos inválidos, o no vino ningún campo.
+- 404: no existe o es de otro rescatista.
+- 409: ya no está activa; o estaba rechazada y la mascota ya tiene otra publicación abierta.
+
+### Dar de baja
+`DELETE /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Baja lógica (`activa = false`). Si
+tenía una adopción en curso, se cancela igual que con "Cancelar" (las postulaciones abiertas quedan
+rechazadas). La mascota sigue a cargo del rescatista y la puede volver a publicar.
+- 204: sin cuerpo.
+- 404: no existe o es de otro rescatista.
+- 409: ya no está activa (dada de baja, o su adopción ya terminó).
 
 ---
 
@@ -189,7 +200,7 @@ la publicación queda `APROBADA` y se crea su adopción en `PUBLICADA`.
 
 ### Rechazar
 `POST /api/adopciones/publicaciones/{id}/rechazar` — Veterinario. `{"motivo": "La foto no se ve bien"}`
-(de 3 a 255 caracteres). El rescatista lo ve en "Mis publicaciones" y puede editarla (etapa 3).
+(de 3 a 255 caracteres). El rescatista lo ve en "Mis publicaciones" y puede editarla para que vuelva a la moderación.
 - 200: `{"publicacion": { ... }}` en `RECHAZADA`.
 - 400: falta el motivo o es muy largo.
 - 404 / 409: igual que al aprobar.
