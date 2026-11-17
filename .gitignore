@@ -1,0 +1,5 @@
+# Lo instala Composer y lo genera PHPUnit: no se sube (igual que en Backend e Inventario).
+vendor/
+composer.lock
+.phpunit.result.cache
+.phpunit.cache/
