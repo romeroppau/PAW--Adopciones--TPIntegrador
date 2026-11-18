@@ -349,10 +349,12 @@ máximo de 5 segundos.
 
 ---
 
-## 8. Avisos (etapa 3)
+## 8. Avisos
 
-Por `POST /internal/notificaciones` de Backend (`contrato-notificaciones.md`, rol 1), con un
-`id_operacion` fijo para que un reintento no repita el aviso:
+Por `POST /internal/notificaciones` de Backend (rol 1), con un `id_operacion` fijo para que un
+reintento no repita el aviso. Canal `WEB`: aparecen en la campana del sitio (`GET /api/notificaciones`).
+Adopciones llama a `BACKEND_URL` (por defecto `http://127.0.0.1:9001`) con `INTERNAL_TOKEN` y un
+tiempo máximo de 3 segundos.
 
 | Cuándo | A quién | Tipo | `id_operacion` |
 |---|---|---|---|
@@ -363,7 +365,7 @@ Por `POST /internal/notificaciones` de Backend (`contrato-notificaciones.md`, ro
 
 Los controles de los 30 y 90 días los manda el motor (rol 4), leyendo `adopcion.fecha_fin` de las
 adopciones `FINALIZADA` (`control-{adopcion}-{30|90}`). Si Backend no responde, la acción del
-circuito se hace igual: el aviso no es parte de la transacción.
+circuito se hace igual: el aviso no es parte de la transacción y el error queda en el log.
 
 ## 9. Casos de humo (`09_adopciones.sh`)
 
