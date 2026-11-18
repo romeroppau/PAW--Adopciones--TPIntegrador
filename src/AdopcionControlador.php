@@ -57,7 +57,18 @@ class AdopcionControlador
     private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId): void
     {
         Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId)");
-        Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($repositorio->postulacion($postulacionId))], 201);
+        $postulacion = $repositorio->postulacion($postulacionId);
+        $adopcion = $repositorio->adopcion($adopcionId);
+
+        // Aviso a la rescatista (si Backend no responde, la postulación queda igual).
+        AvisosAdopcion::enviar(AvisosAdopcion::postulacionNueva(
+            $postulacionId,
+            (int) $adopcion['rescatista_id'],
+            $postulacion['cliente_nombre'],
+            $postulacion['mascota_nombre']
+        ));
+
+        Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)], 201);
     }
 
     // GET /api/adopciones/mis-postulaciones — cliente.
@@ -117,6 +128,15 @@ class AdopcionControlador
     private static function elegido(AdopcionRepositorio $repositorio, int $id, int $postulacionId): void
     {
         Logger::info("Adopciones: se eligió la postulación $postulacionId en la adopción $id");
+        $postulacion = $repositorio->postulacion($postulacionId);
+
+        // Aviso al cliente elegido.
+        AvisosAdopcion::enviar(AvisosAdopcion::postulacionElegida(
+            $postulacionId,
+            (int) $postulacion['cliente_id'],
+            $postulacion['mascota_nombre']
+        ));
+
         self::responderConPostulaciones($repositorio, $repositorio->adopcion($id), true);
     }
 
@@ -189,6 +209,15 @@ class AdopcionControlador
         }
 
         $repositorio->finalizar($id, date('Y-m-d H:i:s'));
+
+        // Aviso al adoptante. Si es un reintento (otro pedido ya la finalizó), el id_operacion fijo
+        // hace que Backend no lo repita.
+        AvisosAdopcion::enviar(AvisosAdopcion::adopcionFinalizada(
+            $id,
+            (int) $adopcion['adoptante_id'],
+            $adopcion['mascota_nombre']
+        ));
+
         self::responderAdopcion($repositorio, $id, 'finalizó: la mascota ' . $adopcion['mascota_id'] . ' pasó al cliente ' . $adopcion['adoptante_id']);
     }
 
