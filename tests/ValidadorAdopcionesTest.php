@@ -87,4 +87,42 @@ final class ValidadorAdopcionesTest extends TestCase
         $this->assertNull(ValidadorAdopciones::id(['postulacion_id' => 1.5], 'postulacion_id'));
         $this->assertNull(ValidadorAdopciones::id([], 'turno_id'));
     }
+
+    public function testElListadoSinFiltrosDevuelveLaPrimeraPaginaDeCien(): void
+    {
+        [$pedido, $errores] = ValidadorAdopciones::listado([]);
+
+        $this->assertSame([], $errores);
+        $this->assertSame(['estado' => null, 'filtros' => [], 'pagina' => 1, 'por_pagina' => 100], $pedido);
+    }
+
+    public function testElListadoAceptaFechasBusquedaYPagina(): void
+    {
+        [$pedido, $errores] = ValidadorAdopciones::listado([
+            'estado' => 'FINALIZADA', 'desde' => '2026-10-20', 'hasta' => '2026-11-19',
+            'buscar' => '  Simba ', 'pagina' => '3', 'por_pagina' => '20',
+        ]);
+
+        $this->assertSame([], $errores);
+        $this->assertSame('FINALIZADA', $pedido['estado']);
+        $this->assertSame(['desde' => '2026-10-20', 'hasta' => '2026-11-19', 'buscar' => 'Simba'], $pedido['filtros']);
+        $this->assertSame([3, 20], [$pedido['pagina'], $pedido['por_pagina']]);
+    }
+
+    public function testElListadoMarcaCadaFiltroMal(): void
+    {
+        [, $errores] = ValidadorAdopciones::listado([
+            'estado' => 'ADOPTADA', 'desde' => '2026-02-30', 'hasta' => '19/11/2026',
+            'buscar' => str_repeat('x', 61), 'pagina' => '0', 'por_pagina' => '101',
+        ]);
+
+        $this->assertSame(['estado', 'desde', 'hasta', 'buscar', 'pagina', 'por_pagina'], array_keys($errores));
+    }
+
+    public function testHastaNoPuedeSerAnteriorADesde(): void
+    {
+        [, $errores] = ValidadorAdopciones::listado(['desde' => '2026-11-19', 'hasta' => '2026-11-01']);
+
+        $this->assertSame(['hasta'], array_keys($errores));
+    }
 }

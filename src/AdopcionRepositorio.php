@@ -309,16 +309,65 @@ class AdopcionRepositorio
         return $filas[0] ?? null;
     }
 
-    // Sin estado: las que no terminaron. Las más viejas primero.
-    public function adopciones(?string $estado): array
+    // La adopción con lo que muestra su detalle: los contactos del rescatista y del adoptante y la
+    // consulta del chequeo (para enlazarla).
+    public function detalle(int $id): ?array
     {
-        $sql = 'SELECT ' . self::COLUMNAS_PUBLICACION . ', ' . self::COLUMNAS_ADOPCION . self::DESDE_ADOPCION;
+        return $this->fila(
+            'SELECT ' . self::COLUMNAS_PUBLICACION . ', ' . self::COLUMNAS_ADOPCION . ',
+                    r.email AS rescatista_email, r.telefono AS rescatista_telefono,
+                    ad.email AS adoptante_email, c.id AS consulta_id'
+            . self::DESDE_ADOPCION
+            . ' LEFT JOIN consulta c ON c.turno_id = t.id WHERE a.id = ?',
+            [$id]
+        );
+    }
+
+    // Una página del listado de la veterinaria y el total. Devuelve [filas, total].
+    // Sin estado: las que no terminaron, las más viejas primero (las que esperan hace más).
+    // FINALIZADA o CANCELADA: las más recientes primero.
+    // Filtros (ya validados): desde y hasta (Y-m-d, sobre el día en que terminó o, si no terminó, en
+    // que empezó) y buscar (nombre de la mascota, del adoptante o del rescatista).
+    public function adopciones(?string $estado, array $filtros, int $pagina, int $porPagina): array
+    {
+        $terminadas = in_array($estado, ['FINALIZADA', 'CANCELADA'], true);
+        $columnaFecha = $terminadas ? 'a.fecha_fin' : 'a.fecha_inicio';
+        $condiciones = [];
+        $parametros = [];
 
         if ($estado === null) {
-            return $this->filas($sql . " WHERE a.estado NOT IN ('FINALIZADA', 'CANCELADA') ORDER BY a.fecha_inicio, a.id LIMIT 100");
+            $condiciones[] = "a.estado NOT IN ('FINALIZADA', 'CANCELADA')";
+        } else {
+            $condiciones[] = 'a.estado = ?';
+            $parametros[] = $estado;
+        }
+        if (isset($filtros['desde'])) {
+            $condiciones[] = "$columnaFecha >= ?";
+            $parametros[] = $filtros['desde'];
+        }
+        if (isset($filtros['hasta'])) {
+            // Hasta el final de ese día, sin envolver la columna en DATE() (así usa el índice).
+            $condiciones[] = "$columnaFecha < ? + INTERVAL 1 DAY";
+            $parametros[] = $filtros['hasta'];
+        }
+        if (isset($filtros['buscar'])) {
+            $condiciones[] = '(m.nombre LIKE ? OR ad.nombre LIKE ? OR r.nombre LIKE ?)';
+            $patron = '%' . addcslashes($filtros['buscar'], '%_\\') . '%';
+            array_push($parametros, $patron, $patron, $patron);
         }
 
-        return $this->filas($sql . ' WHERE a.estado = ? ORDER BY a.fecha_inicio, a.id LIMIT 100', [$estado]);
+        $donde = ' WHERE ' . implode(' AND ', $condiciones);
+        $orden = $terminadas ? ' ORDER BY a.fecha_fin DESC, a.id DESC' : ' ORDER BY a.fecha_inicio, a.id';
+        $desplazamiento = ($pagina - 1) * $porPagina;
+
+        $total = (int) $this->fila('SELECT COUNT(*) AS total' . self::DESDE_ADOPCION . $donde, $parametros)['total'];
+        $filas = $this->filas(
+            'SELECT ' . self::COLUMNAS_PUBLICACION . ', ' . self::COLUMNAS_ADOPCION . self::DESDE_ADOPCION
+            . $donde . $orden . " LIMIT $porPagina OFFSET $desplazamiento",
+            $parametros
+        );
+
+        return [$filas, $total];
     }
 
     // Devuelve [resultado, id]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
@@ -597,6 +646,22 @@ class AdopcionRepositorio
                 'estado' => $f['turno_estado'],
             ],
         ];
+    }
+
+    // El detalle (GET /api/adopciones/{id}/detalle): la adopción con los contactos y la consulta del chequeo.
+    public static function formatoDetalle(array $f): array
+    {
+        $adopcion = self::formatoAdopcion($f);
+        $adopcion['publicacion']['rescatista']['email'] = $f['rescatista_email'];
+        $adopcion['publicacion']['rescatista']['telefono'] = $f['rescatista_telefono'];
+        if ($adopcion['adoptante'] !== null) {
+            $adopcion['adoptante']['email'] = $f['adoptante_email'];
+        }
+        if ($adopcion['turno_chequeo'] !== null) {
+            $adopcion['turno_chequeo']['consulta_id'] = $f['consulta_id'] === null ? null : (int) $f['consulta_id'];
+        }
+
+        return $adopcion;
     }
 
     // El teléfono del cliente solo se muestra cuando la postulación está ELEGIDA.
