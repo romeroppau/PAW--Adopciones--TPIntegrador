@@ -24,3 +24,4 @@ $router->post('/api/adopciones/{id}/elegir', [AdopcionControlador::class, 'elegi
 $router->post('/api/adopciones/{id}/chequeo', [AdopcionControlador::class, 'chequeo']);
 $router->post('/api/adopciones/{id}/completar', [AdopcionControlador::class, 'completar']);
 $router->post('/api/adopciones/{id}/cancelar', [AdopcionControlador::class, 'cancelar']);
+$router->get('/api/adopciones/{id}/detalle', [AdopcionControlador::class, 'ver']);

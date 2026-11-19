@@ -261,12 +261,34 @@ En una transacción: esa postulación queda `ELEGIDA`, las demás `RECHAZADA` y 
 
 ## 6. Chequeo y cierre (Adopciones, veterinaria)
 
-### Adopciones en curso
-`GET /api/adopciones` — Veterinario. Parámetro opcional `estado` (uno de los seis); sin él, las que
-no terminaron. Las más viejas primero (hasta 100).
-- 200: `{"adopciones": [{"id": 101, "estado": "ADOPTANTE_ELEGIDO", "fecha_inicio": "…", "fecha_fin": null, "publicacion": { ... }, "adoptante": {"id": 103, "nombre": "Cliente Dos", "telefono": "1155550103"}, "turno_chequeo": null}]}`
+### Listar adopciones
+`GET /api/adopciones` — Veterinario. Todos los parámetros son opcionales:
 
-`turno_chequeo` es `{"id", "fecha", "hora", "estado"}` o `null`.
+| Parámetro | Qué hace |
+|---|---|
+| `estado` | Uno de los seis. Sin él, las que no terminaron (las "en curso") |
+| `desde`, `hasta` | `AAAA-MM-DD`, inclusive. Filtran por el día en que terminó (`FINALIZADA`, `CANCELADA`) o, si no terminó, en que empezó |
+| `buscar` | Hasta 60 caracteres. Busca en el nombre de la mascota, del adoptante y del rescatista |
+| `pagina` | Desde 1 (por defecto, 1) |
+| `por_pagina` | De 1 a 100 (por defecto, 100) |
+
+Orden: las en curso, las más viejas primero (las que esperan hace más); las `FINALIZADA` y
+`CANCELADA`, las que terminaron más recientemente primero.
+- 200: `{"adopciones": [{"id": 101, "estado": "ADOPTANTE_ELEGIDO", "fecha_inicio": "…", "fecha_fin": null, "publicacion": { ... }, "adoptante": {"id": 103, "nombre": "Cliente Dos", "telefono": "1155550103"}, "turno_chequeo": null}], "total": 1, "pagina": 1, "por_pagina": 100}`
+- 400 si algún parámetro está mal, con el campo en `campos` (`"El estado no es válido"` o `"Los filtros no son válidos"`).
+
+`turno_chequeo` es `{"id", "fecha", "hora", "estado"}` o `null`. `total` cuenta todas las que
+cumplen el filtro, no solo las de esta página.
+
+### Detalle de una adopción
+`GET /api/adopciones/{id}/detalle` — La veterinaria (cualquiera) o el rescatista de la publicación (las suyas).
+La misma forma que en el listado, más los contactos y la consulta del chequeo, y todas las postulaciones:
+- 200: `{"adopcion": {..., "publicacion": {..., "rescatista": {"id", "nombre", "organizacion", "email", "telefono"}}, "adoptante": {"id", "nombre", "telefono", "email"}, "turno_chequeo": {"id", "fecha", "hora", "estado", "consulta_id"}}, "postulaciones": [ ... ]}`
+- `consulta_id` es `null` mientras el chequeo no se empezó a atender.
+- 404 si no existe o es de otro rescatista.
+
+(Lleva `/detalle` porque el router usa la primera ruta que coincide: `/api/adopciones/{id}` a secas
+también coincidiría con `/api/adopciones/salud`.)
 
 ### Asociar el chequeo
 El turno se carga primero en la agenda, como cualquier otro: `POST /api/pacientes/turnos` con la

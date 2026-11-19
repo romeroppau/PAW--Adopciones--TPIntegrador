@@ -84,6 +84,56 @@ class ValidadorAdopciones
         return [$limpios, $errores];
     }
 
+    public const ESTADOS_ADOPCION = ['PUBLICADA', 'CON_POSTULANTES', 'ADOPTANTE_ELEGIDO', 'CHEQUEO_PENDIENTE', 'FINALIZADA', 'CANCELADA'];
+    public const POR_PAGINA_MAXIMO = 100;
+
+    // GET /api/adopciones?estado=&desde=&hasta=&buscar=&pagina=&por_pagina= (todos opcionales).
+    // Devuelve [datos limpios, errores]. Los datos: estado (o null), filtros (desde, hasta, buscar),
+    // pagina (desde 1) y por_pagina (hasta 100; si no viene, 100, como antes de paginar).
+    public static function listado(array $query): array
+    {
+        $errores = [];
+        $filtros = [];
+        $estado = $query['estado'] ?? null;
+
+        if ($estado !== null && !in_array($estado, self::ESTADOS_ADOPCION, true)) {
+            $errores['estado'] = 'No es un estado de adopción';
+        }
+
+        foreach (['desde', 'hasta'] as $campo) {
+            if (!isset($query[$campo]) || $query[$campo] === '') {
+                continue;
+            }
+            if (self::esFecha($query[$campo])) {
+                $filtros[$campo] = $query[$campo];
+            } else {
+                $errores[$campo] = 'La fecha tiene que tener el formato AAAA-MM-DD';
+            }
+        }
+        if (isset($filtros['desde'], $filtros['hasta']) && $filtros['desde'] > $filtros['hasta']) {
+            $errores['hasta'] = 'La fecha "hasta" no puede ser anterior a "desde"';
+        }
+
+        $buscar = $query['buscar'] ?? '';
+        if (!is_string($buscar)) {
+            $errores['buscar'] = 'La búsqueda tiene que ser un texto';
+        } elseif (trim($buscar) !== '') {
+            if (mb_strlen(trim($buscar)) > 60) {
+                $errores['buscar'] = 'La búsqueda puede tener hasta 60 caracteres';
+            } else {
+                $filtros['buscar'] = trim($buscar);
+            }
+        }
+
+        $pagina = self::enteroDeQuery($query, 'pagina', 1, 100000, 1, $errores);
+        $porPagina = self::enteroDeQuery($query, 'por_pagina', 1, self::POR_PAGINA_MAXIMO, self::POR_PAGINA_MAXIMO, $errores);
+
+        return [
+            ['estado' => $estado, 'filtros' => $filtros, 'pagina' => $pagina, 'por_pagina' => $porPagina],
+            $errores,
+        ];
+    }
+
     // {"postulacion_id": 101} o {"turno_id": 120}: un id entero de verdad, o null.
     public static function id(array $datos, string $campo): ?int
     {
@@ -115,6 +165,32 @@ class ValidadorAdopciones
         } else {
             $limpios[$campo] = $valor;
         }
+    }
+
+    // Una fecha real con el formato AAAA-MM-DD (rechaza, por ejemplo, 2026-02-30).
+    private static function esFecha(mixed $valor): bool
+    {
+        if (!is_string($valor) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $valor, $partes)) {
+            return false;
+        }
+
+        return checkdate((int) $partes[2], (int) $partes[3], (int) $partes[1]);
+    }
+
+    // Un entero de la query string entre $minimo y $maximo. Si no viene, $porDefecto.
+    private static function enteroDeQuery(array $query, string $campo, int $minimo, int $maximo, int $porDefecto, array &$errores): int
+    {
+        $valor = $query[$campo] ?? null;
+
+        if ($valor === null || $valor === '') {
+            return $porDefecto;
+        }
+        if (!is_string($valor) || !ctype_digit($valor) || (int) $valor < $minimo || (int) $valor > $maximo) {
+            $errores[$campo] = "Tiene que ser un número entre $minimo y $maximo";
+            return $porDefecto;
+        }
+
+        return (int) $valor;
     }
 
     private static function esId(mixed $valor): bool

@@ -3,23 +3,54 @@
 // Postulaciones, elección del adoptante, chequeo y cierre (contrato-adopciones.md, secciones 5 y 6).
 class AdopcionControlador
 {
-    private const ESTADOS = ['PUBLICADA', 'CON_POSTULANTES', 'ADOPTANTE_ELEGIDO', 'CHEQUEO_PENDIENTE', 'FINALIZADA', 'CANCELADA'];
-
-    // GET /api/adopciones — veterinaria. Sin estado: las que no terminaron.
+    // GET /api/adopciones — veterinaria. Sin estado: las que no terminaron. De a una página, con
+    // filtros de fechas y búsqueda (contrato-adopciones.md, sección 6).
     public static function listar(): void
     {
         Auth::requerirRol(['VETERINARIO']);
-        $estado = Request::query()['estado'] ?? null;
+        [$pedido, $errores] = ValidadorAdopciones::listado(Request::query());
 
-        if ($estado !== null && !in_array($estado, self::ESTADOS, true)) {
-            Response::error('El estado no es válido', 400, ['estado' => 'No es un estado de adopción']);
+        if ($errores !== []) {
+            $mensaje = isset($errores['estado']) ? 'El estado no es válido' : 'Los filtros no son válidos';
+            Response::error($mensaje, 400, $errores);
+            return;
+        }
+
+        [$filas, $total] = self::repositorio()->adopciones(
+            $pedido['estado'],
+            $pedido['filtros'],
+            $pedido['pagina'],
+            $pedido['por_pagina']
+        );
+
+        Response::json([
+            'adopciones' => array_map([AdopcionRepositorio::class, 'formatoAdopcion'], $filas),
+            'total' => $total,
+            'pagina' => $pedido['pagina'],
+            'por_pagina' => $pedido['por_pagina'],
+        ]);
+    }
+
+    // GET /api/adopciones/{id}/detalle — la veterinaria (cualquiera) o el rescatista (las suyas). La adopción
+    // con sus contactos, el chequeo con su consulta y todas las postulaciones.
+    public static function ver(array $parametros): void
+    {
+        $sesion = Auth::requerirRol(['VETERINARIO', 'RESCATISTA']);
+        $repositorio = self::repositorio();
+        $id = ParametroRuta::entero($parametros, 'id');
+        $adopcion = $id === null ? null : $repositorio->detalle($id);
+
+        if ($adopcion === null
+            || ($sesion['rol'] === 'RESCATISTA' && (int) $adopcion['rescatista_id'] !== (int) $sesion['id'])) {
+            Response::error('Adopción no encontrada', 404);
             return;
         }
 
         Response::json([
-            'adopciones' => array_map(
-                [AdopcionRepositorio::class, 'formatoAdopcion'],
-                self::repositorio()->adopciones($estado)
+            'adopcion' => AdopcionRepositorio::formatoDetalle($adopcion),
+            'postulaciones' => array_map(
+                [AdopcionRepositorio::class, 'formatoPostulacion'],
+                $repositorio->postulacionesDeAdopcion($id)
             ),
         ]);
     }
