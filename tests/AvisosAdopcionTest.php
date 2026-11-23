@@ -27,6 +27,33 @@ final class AvisosAdopcionTest extends TestCase
         $this->assertStringContainsString('Te eligieron para adoptar a Pipa', $aviso['mensaje']);
     }
 
+    public function testElTurnoDelChequeoLeAvisaAlAdoptanteYALaRescatistaPorLosDosCanales(): void
+    {
+        $avisos = AvisosAdopcion::chequeoAsignado(101, 120, 103, 104, 'Cliente Dos', 'Pipa', '2026-11-26', '10:00:00');
+
+        $this->assertCount(4, $avisos);
+        $porId = array_column($avisos, null, 'id_operacion');
+        $this->assertSame(
+            ['chequeo-101-120-adoptante-web', 'chequeo-101-120-rescatista-web', 'chequeo-101-120-adoptante-whatsapp', 'chequeo-101-120-rescatista-whatsapp'],
+            array_keys($porId)
+        );
+
+        $adoptante = $porId['chequeo-101-120-adoptante-whatsapp'];
+        $this->assertSame(103, $adoptante['usuario_id']);
+        $this->assertSame('WHATSAPP', $adoptante['canal']);
+        $this->assertStringContainsString('chequeo de adopción de Pipa el jueves 26/11 a las 10:00', $adoptante['mensaje']);
+
+        $rescatista = $porId['chequeo-101-120-rescatista-web'];
+        $this->assertSame(104, $rescatista['usuario_id']);
+        $this->assertSame('WEB', $rescatista['canal']);
+        $this->assertStringContainsString('Cliente Dos tiene turno para el chequeo de adopción de Pipa', $rescatista['mensaje']);
+
+        foreach ($avisos as $aviso) {
+            $this->assertSame('POSTULACION', $aviso['tipo']);
+            $this->assertStringNotContainsString("\n", $aviso['mensaje']);   // WhatsApp: un solo renglón
+        }
+    }
+
     public function testCompletarLeAvisaAlAdoptante(): void
     {
         $aviso = AvisosAdopcion::adopcionFinalizada(101, 103, 'Pipa');
