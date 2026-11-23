@@ -196,8 +196,30 @@ class AdopcionControlador
         match ($resultado) {
             'NO_EXISTE' => Response::error('Adopción no encontrada', 404),
             'ESTADO' => Response::error('La adopción no está esperando el chequeo', 409),
-            default => self::responderAdopcion($repositorio, $id, "se asoció el turno $turnoId como chequeo"),
+            default => self::chequeoAsociado($repositorio, $id, $turnoId),
         };
+    }
+
+    private static function chequeoAsociado(AdopcionRepositorio $repositorio, int $id, int $turnoId): void
+    {
+        $adopcion = $repositorio->adopcion($id);
+
+        // Avisos al adoptante y a la rescatista (campana y WhatsApp). No cortan la respuesta.
+        $avisos = AvisosAdopcion::chequeoAsignado(
+            $id,
+            $turnoId,
+            (int) $adopcion['adoptante_id'],
+            (int) $adopcion['rescatista_id'],
+            (string) $adopcion['adoptante_nombre'],
+            (string) $adopcion['mascota_nombre'],
+            (string) $adopcion['turno_fecha'],
+            (string) $adopcion['turno_hora']
+        );
+        foreach ($avisos as $aviso) {
+            AvisosAdopcion::enviar($aviso);
+        }
+
+        self::responderAdopcion($repositorio, $id, "se asoció el turno $turnoId como chequeo");
     }
 
     // POST /api/adopciones/{id}/completar — veterinaria. Pide a Pacientes que pase la mascota al

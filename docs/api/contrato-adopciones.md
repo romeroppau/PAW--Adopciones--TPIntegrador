@@ -242,6 +242,10 @@ La primera postulación pasa la adopción de `PUBLICADA` a `CON_POSTULANTES`.
 `GET /api/adopciones/mis-postulaciones` — Cliente. Las suyas, de la más nueva a la más vieja.
 - 200: `{"postulaciones": [ ... ]}`
 
+En la postulación `ELEGIDA`, `adopcion.turno_chequeo` trae el turno del chequeo cuando ya está
+asignado: `{"fecha": "2026-11-26", "hora": "10:00", "estado": "PROGRAMADO"}` (si no, `null`). Con
+`adopcion.estado` el cliente ve en qué paso está: esperando el turno, con turno, adoptado o cancelada.
+
 ### Postulantes de una adopción
 `GET /api/adopciones/{id}/postulaciones` — El rescatista de la publicación o la veterinaria.
 Por fecha, las más viejas primero.
@@ -375,6 +379,7 @@ máximo de 5 segundos.
 
 Por `POST /internal/notificaciones` de Backend (rol 1), con un `id_operacion` fijo para que un
 reintento no repita el aviso. Canal `WEB`: aparecen en la campana del sitio (`GET /api/notificaciones`).
+El turno del chequeo sale además por `WHATSAPP` (un aviso por canal, cada uno con su `id_operacion`).
 Adopciones llama a `BACKEND_URL` (por defecto `http://127.0.0.1:9001`) con `INTERNAL_TOKEN` y un
 tiempo máximo de 3 segundos.
 
@@ -383,6 +388,7 @@ tiempo máximo de 3 segundos.
 | La veterinaria aprueba o rechaza al rescatista (lo manda Backend directamente) | Rescatista | `CUENTA` | `cuenta-{usuario}-{APROBADO\|RECHAZADO}` |
 | Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` |
 | El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
+| La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
 | Se completa la adopción | Adoptante | `CONTROL_ADOPCION` | `adopcion-finalizada-{adopcion}` |
 
 Los controles de los 30 y 90 días los manda el motor (rol 4), leyendo `adopcion.fecha_fin` de las

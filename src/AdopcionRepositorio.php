@@ -45,10 +45,12 @@ class AdopcionRepositorio
         SELECT po.id, po.estado, po.fecha, po.tipo_vivienda, po.otras_mascotas, po.tiempo_disponible,
                po.cliente_id, c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
                a.id AS adopcion_id, a.estado AS adopcion_estado,
+               t.fecha AS turno_fecha, t.hora AS turno_hora, t.estado AS turno_estado,
                p.id AS publicacion_id, p.titulo, m.id AS mascota_id, m.nombre AS mascota_nombre
         FROM postulacion po
         JOIN usuario c ON c.id = po.cliente_id
         JOIN adopcion a ON a.id = po.adopcion_id
+        LEFT JOIN turno t ON t.id = a.turno_chequeo_id
         JOIN publicacion p ON p.id = a.publicacion_id
         JOIN mascota m ON m.id = p.mascota_id";
 
@@ -679,7 +681,16 @@ class AdopcionRepositorio
                 'nombre' => $f['cliente_nombre'],
                 'telefono' => $f['estado'] === 'ELEGIDA' ? $f['cliente_telefono'] : null,
             ],
-            'adopcion' => ['id' => (int) $f['adopcion_id'], 'estado' => $f['adopcion_estado']],
+            'adopcion' => [
+                'id' => (int) $f['adopcion_id'],
+                'estado' => $f['adopcion_estado'],
+                // El turno del chequeo, solo para la postulación elegida (es la del adoptante).
+                'turno_chequeo' => $f['estado'] === 'ELEGIDA' && ($f['turno_fecha'] ?? null) !== null ? [
+                    'fecha' => $f['turno_fecha'],
+                    'hora' => substr((string) $f['turno_hora'], 0, 5),
+                    'estado' => $f['turno_estado'],
+                ] : null,
+            ],
             'publicacion' => [
                 'id' => (int) $f['publicacion_id'],
                 'titulo' => $f['titulo'],

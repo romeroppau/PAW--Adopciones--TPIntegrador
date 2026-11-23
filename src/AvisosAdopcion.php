@@ -27,6 +27,42 @@ class AvisosAdopcion
         );
     }
 
+    // La veterinaria asigna el turno del chequeo (o lo reprograma): al adoptante y a la rescatista,
+    // por la campana y por WhatsApp. Un aviso por persona y por canal, cada uno con su id_operacion;
+    // si se reprograma, el turno nuevo tiene otro id y el aviso vuelve a salir.
+    public static function chequeoAsignado(
+        int $adopcionId,
+        int $turnoId,
+        int $adoptanteId,
+        int $rescatistaId,
+        string $adoptante,
+        string $mascota,
+        string $fecha,
+        string $hora
+    ): array {
+        $cuando = self::cuando($fecha, $hora);
+        $avisos = [];
+
+        foreach (['WEB' => 'web', 'WHATSAPP' => 'whatsapp'] as $canal => $sufijo) {
+            $avisos[] = self::aviso(
+                $adoptanteId,
+                'POSTULACION',
+                "Tenés turno para el chequeo de adopción de $mascota el $cuando en HuellaVet (Av. San Martín 1450, Luján). Si no podés ir, avisanos por WhatsApp.",
+                "chequeo-$adopcionId-$turnoId-adoptante-$sufijo",
+                $canal
+            );
+            $avisos[] = self::aviso(
+                $rescatistaId,
+                'POSTULACION',
+                "$adoptante tiene turno para el chequeo de adopción de $mascota el $cuando en HuellaVet.",
+                "chequeo-$adopcionId-$turnoId-rescatista-$sufijo",
+                $canal
+            );
+        }
+
+        return $avisos;
+    }
+
     // Se completa la adopción: al adoptante.
     public static function adopcionFinalizada(int $adopcionId, int $adoptanteId, string $mascota): array
     {
@@ -51,12 +87,21 @@ class AvisosAdopcion
         return true;
     }
 
-    private static function aviso(int $usuarioId, string $tipo, string $mensaje, string $idOperacion): array
+    // "2026-11-26" y "10:00:00" → "jueves 26/11 a las 10:00".
+    public static function cuando(string $fecha, string $hora): string
+    {
+        $dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+        $momento = strtotime($fecha . ' 12:00:00');
+
+        return $dias[(int) date('w', $momento)] . ' ' . date('d/m', $momento) . ' a las ' . substr($hora, 0, 5);
+    }
+
+    private static function aviso(int $usuarioId, string $tipo, string $mensaje, string $idOperacion, string $canal = 'WEB'): array
     {
         return [
             'usuario_id' => $usuarioId,
             'tipo' => $tipo,
-            'canal' => 'WEB',
+            'canal' => $canal,
             'mensaje' => mb_substr($mensaje, 0, 500),
             'fecha_programada' => date('Y-m-d H:i:s'),
             'id_operacion' => $idOperacion,
