@@ -83,7 +83,19 @@ class PublicacionControlador
         }
 
         Logger::info("Adopciones: el rescatista $rescatistaId publicó la mascota {$datos['mascota_id']} (publicación $id)");
-        Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($repositorio->publicacion($id), true)], 201);
+        $publicacion = $repositorio->publicacion($id);
+
+        // Aviso a cada veterinaria: hay una publicación para revisar. No corta la respuesta.
+        foreach ($repositorio->veterinarias() as $veterinariaId) {
+            AvisosAdopcion::enviar(AvisosAdopcion::publicacionNueva(
+                $id,
+                $veterinariaId,
+                (string) $publicacion['rescatista_nombre'],
+                (string) $publicacion['mascota_nombre']
+            ));
+        }
+
+        Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($publicacion, true)], 201);
     }
 
     // PUT /api/adopciones/publicaciones/{id} — el rescatista edita la suya (activa).
@@ -203,7 +215,18 @@ class PublicacionControlador
     private static function moderada(AdopcionRepositorio $repositorio, int $id, bool $rechazar, int $veterinarioId): void
     {
         Logger::info('Adopciones: la veterinaria ' . $veterinarioId . ($rechazar ? ' rechazó' : ' aprobó') . " la publicación $id");
-        Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($repositorio->publicacion($id), true)]);
+        $publicacion = $repositorio->publicacion($id);
+
+        // Aviso a la rescatista: aprobada o rechazada con el motivo. No corta la respuesta.
+        AvisosAdopcion::enviar(AvisosAdopcion::publicacionModerada(
+            $id,
+            (int) $publicacion['rescatista_id'],
+            (string) $publicacion['mascota_nombre'],
+            $rechazar ? (string) $publicacion['motivo_rechazo'] : null,
+            date('YmdHis')
+        ));
+
+        Response::json(['publicacion' => AdopcionRepositorio::formatoPublicacion($publicacion, true)]);
     }
 
     // [fila, con conteo de postulaciones] si quien pide puede ver la publicación; si no, null.

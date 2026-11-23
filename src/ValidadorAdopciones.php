@@ -125,6 +125,15 @@ class ValidadorAdopciones
             }
         }
 
+        $orden = $query['orden'] ?? '';
+        if ($orden !== '' && $orden !== null) {
+            if (in_array($orden, ['prioridad', 'recientes', 'antiguas'], true)) {
+                $filtros['orden'] = $orden;
+            } else {
+                $errores['orden'] = 'El orden puede ser prioridad, recientes o antiguas';
+            }
+        }
+
         $pagina = self::enteroDeQuery($query, 'pagina', 1, 100000, 1, $errores);
         $porPagina = self::enteroDeQuery($query, 'por_pagina', 1, self::POR_PAGINA_MAXIMO, self::POR_PAGINA_MAXIMO, $errores);
 

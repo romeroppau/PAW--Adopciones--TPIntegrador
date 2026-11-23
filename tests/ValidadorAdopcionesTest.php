@@ -125,4 +125,20 @@ final class ValidadorAdopcionesTest extends TestCase
 
         $this->assertSame(['hasta'], array_keys($errores));
     }
+
+    public function testElListadoAceptaLosTresOrdenesYRechazaOtro(): void
+    {
+        foreach (['prioridad', 'recientes', 'antiguas'] as $orden) {
+            [$pedido, $errores] = ValidadorAdopciones::listado(['orden' => $orden]);
+            $this->assertSame([], $errores);
+            $this->assertSame($orden, $pedido['filtros']['orden']);
+        }
+
+        [, $errores] = ValidadorAdopciones::listado(['orden' => 'al azar']);
+        $this->assertArrayHasKey('orden', $errores);
+
+        [$pedido, $errores] = ValidadorAdopciones::listado([]);
+        $this->assertSame([], $errores);
+        $this->assertArrayNotHasKey('orden', $pedido['filtros']);
+    }
 }

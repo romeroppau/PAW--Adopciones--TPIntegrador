@@ -275,9 +275,12 @@ En una transacción: esa postulación queda `ELEGIDA`, las demás `RECHAZADA` y 
 | `buscar` | Hasta 60 caracteres. Busca en el nombre de la mascota, del adoptante y del rescatista |
 | `pagina` | Desde 1 (por defecto, 1) |
 | `por_pagina` | De 1 a 100 (por defecto, 100) |
+| `orden` | `prioridad`, `recientes` o `antiguas` (otro valor: 400) |
 
-Orden: las en curso, las más viejas primero (las que esperan hace más); las `FINALIZADA` y
-`CANCELADA`, las que terminaron más recientemente primero.
+Orden por defecto: las en curso, las más viejas primero (las que esperan hace más); las `FINALIZADA` y
+`CANCELADA`, las que terminaron más recientemente primero. Con `orden=prioridad`, primero lo que
+necesita a la veterinaria: los chequeos con turno (el más próximo primero), después las que tienen
+adoptante elegido y esperan turno, las que tienen postulantes y las publicadas sin postulantes.
 - 200: `{"adopciones": [{"id": 101, "estado": "ADOPTANTE_ELEGIDO", "fecha_inicio": "…", "fecha_fin": null, "publicacion": { ... }, "adoptante": {"id": 103, "nombre": "Cliente Dos", "telefono": "1155550103"}, "turno_chequeo": null}], "total": 1, "pagina": 1, "por_pagina": 100}`
 - 400 si algún parámetro está mal, con el campo en `campos` (`"El estado no es válido"` o `"Los filtros no son válidos"`).
 
@@ -386,6 +389,9 @@ tiempo máximo de 3 segundos.
 | Cuándo | A quién | Tipo | `id_operacion` |
 |---|---|---|---|
 | La veterinaria aprueba o rechaza al rescatista (lo manda Backend directamente) | Rescatista | `CUENTA` | `cuenta-{usuario}-{APROBADO\|RECHAZADO}` |
+| La rescatista publica un animal | Cada veterinaria | `POSTULACION` | `publicacion-nueva-{publicacion}-vet-{veterinaria}` |
+| La veterinaria aprueba la publicación | Rescatista | `POSTULACION` | `publicacion-{publicacion}-aprobada` |
+| La veterinaria rechaza la publicación (con el motivo) | Rescatista | `POSTULACION` | `publicacion-{publicacion}-rechazada-{AAAAMMDDHHMMSS}` |
 | Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` |
 | El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
 | La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |

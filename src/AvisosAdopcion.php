@@ -5,6 +5,38 @@
 // Si Backend no responde, la acción del circuito se hace igual: el aviso no es parte de la transacción.
 class AvisosAdopcion
 {
+    // La rescatista publica un animal: a cada veterinaria, para que lo revise.
+    public static function publicacionNueva(int $publicacionId, int $veterinariaId, string $rescatista, string $mascota): array
+    {
+        return self::aviso(
+            $veterinariaId,
+            'POSTULACION',
+            "$rescatista publicó a $mascota para adopción y espera tu revisión. Está en Adopciones y rescatistas → Publicaciones por revisar.",
+            "publicacion-nueva-$publicacionId-vet-$veterinariaId"
+        );
+    }
+
+    // La veterinaria aprueba o rechaza la publicación: a la rescatista. $momento (AAAAMMDDHHMMSS) distingue
+    // un segundo rechazo después de editarla.
+    public static function publicacionModerada(int $publicacionId, int $rescatistaId, string $mascota, ?string $motivoRechazo, string $momento): array
+    {
+        if ($motivoRechazo === null) {
+            return self::aviso(
+                $rescatistaId,
+                'POSTULACION',
+                "¡Aprobamos la publicación de $mascota! Ya se ve en Adopciones y pueden postularse.",
+                "publicacion-$publicacionId-aprobada"
+            );
+        }
+
+        return self::aviso(
+            $rescatistaId,
+            'POSTULACION',
+            "No aprobamos la publicación de $mascota. Motivo: $motivoRechazo. Podés editarla en Mis publicaciones y vuelve a revisión.",
+            "publicacion-$publicacionId-rechazada-$momento"
+        );
+    }
+
     // Llega una postulación: a la rescatista.
     public static function postulacionNueva(int $postulacionId, int $rescatistaId, string $cliente, string $mascota): array
     {

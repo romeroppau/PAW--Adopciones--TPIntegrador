@@ -6,6 +6,28 @@ use PHPUnit\Framework\TestCase;
 // id_operacion. Que lleguen a la campana lo prueba 09_adopciones.sh del Gateway.
 final class AvisosAdopcionTest extends TestCase
 {
+    public function testUnaPublicacionNuevaLeAvisaACadaVeterinaria(): void
+    {
+        $aviso = AvisosAdopcion::publicacionNueva(55, 101, 'Rescatista Aprobada', 'Canela');
+
+        $this->assertSame(101, $aviso['usuario_id']);
+        $this->assertSame('WEB', $aviso['canal']);
+        $this->assertSame('publicacion-nueva-55-vet-101', $aviso['id_operacion']);
+        $this->assertStringContainsString('Rescatista Aprobada publicó a Canela para adopción', $aviso['mensaje']);
+    }
+
+    public function testModerarLeAvisaALaRescatistaConElMotivoSiSeRechaza(): void
+    {
+        $aprobada = AvisosAdopcion::publicacionModerada(55, 104, 'Canela', null, '20261123170000');
+        $this->assertSame(104, $aprobada['usuario_id']);
+        $this->assertSame('publicacion-55-aprobada', $aprobada['id_operacion']);
+        $this->assertStringContainsString('Aprobamos la publicación de Canela', $aprobada['mensaje']);
+
+        $rechazada = AvisosAdopcion::publicacionModerada(56, 104, 'Rocco', 'La foto no se ve bien', '20261123170000');
+        $this->assertSame('publicacion-56-rechazada-20261123170000', $rechazada['id_operacion']);
+        $this->assertStringContainsString('No aprobamos la publicación de Rocco. Motivo: La foto no se ve bien', $rechazada['mensaje']);
+    }
+
     public function testLaPostulacionNuevaLeAvisaALaRescatista(): void
     {
         $aviso = AvisosAdopcion::postulacionNueva(7, 104, 'Cliente Dos', 'Pipa');
