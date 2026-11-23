@@ -91,6 +91,15 @@ class AdopcionRepositorio
         );
     }
 
+    // Las cuentas de la veterinaria: a quiénes se avisa que hay una publicación por revisar.
+    public function veterinarias(): array
+    {
+        return array_map('intval', array_column(
+            $this->filas("SELECT id FROM usuario WHERE rol = 'VETERINARIO' ORDER BY id"),
+            'id'
+        ));
+    }
+
     public function publicacion(int $id): ?array
     {
         $filas = $this->filas(
@@ -359,7 +368,7 @@ class AdopcionRepositorio
         }
 
         $donde = ' WHERE ' . implode(' AND ', $condiciones);
-        $orden = $terminadas ? ' ORDER BY a.fecha_fin DESC, a.id DESC' : ' ORDER BY a.fecha_inicio, a.id';
+        $orden = self::ordenAdopciones($filtros['orden'] ?? null, $terminadas, $columnaFecha);
         $desplazamiento = ($pagina - 1) * $porPagina;
 
         $total = (int) $this->fila('SELECT COUNT(*) AS total' . self::DESDE_ADOPCION . $donde, $parametros)['total'];
@@ -370,6 +379,25 @@ class AdopcionRepositorio
         );
 
         return [$filas, $total];
+    }
+
+    // Orden del listado de la veterinaria:
+    //   prioridad: lo que necesita a la veterinaria primero: chequeos con turno (el más próximo
+    //              primero), después adoptante elegido esperando turno, con postulantes y publicadas;
+    //   recientes: las más nuevas primero (por el día en que empezó o, si terminó, en que terminó);
+    //   antiguas:  las que esperan hace más primero.
+    // Sin orden: las que no terminaron, antiguas; las terminadas, recientes (como antes).
+    private static function ordenAdopciones(?string $orden, bool $terminadas, string $columnaFecha): string
+    {
+        $orden ??= $terminadas ? 'recientes' : 'antiguas';
+
+        return match ($orden) {
+            'prioridad' => " ORDER BY CASE a.estado WHEN 'CHEQUEO_PENDIENTE' THEN 0 WHEN 'ADOPTANTE_ELEGIDO' THEN 1"
+                . " WHEN 'CON_POSTULANTES' THEN 2 WHEN 'PUBLICADA' THEN 3 ELSE 4 END,"
+                . " t.fecha IS NULL, t.fecha, t.hora, a.fecha_inicio, a.id",
+            'recientes' => " ORDER BY $columnaFecha DESC, a.id DESC",
+            default => " ORDER BY $columnaFecha, a.id",
+        };
     }
 
     // Devuelve [resultado, id]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
