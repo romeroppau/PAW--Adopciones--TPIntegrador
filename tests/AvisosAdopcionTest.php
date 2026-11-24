@@ -39,6 +39,16 @@ final class AvisosAdopcionTest extends TestCase
         $this->assertStringContainsString('Cliente Dos se postuló para adoptar a Pipa', $aviso['mensaje']);
     }
 
+    public function testCancelarLaPostulacionLeAvisaALaRescatista(): void
+    {
+        $aviso = AvisosAdopcion::postulacionCancelada(7, 104, 'Cliente Dos', 'Pipa');
+
+        $this->assertSame(104, $aviso['usuario_id']);
+        $this->assertSame('POSTULACION', $aviso['tipo']);
+        $this->assertSame('postulacion-cancelada-7', $aviso['id_operacion']);
+        $this->assertSame('Cliente Dos canceló su postulación para adoptar a Pipa.', $aviso['mensaje']);
+    }
+
     public function testElegirLeAvisaAlClienteElegido(): void
     {
         $aviso = AvisosAdopcion::postulacionElegida(7, 103, 'Pipa');

@@ -85,6 +85,41 @@ class AdopcionControlador
         };
     }
 
+    // POST /api/adopciones/postulaciones/{id}/cancelar — el cliente cancela su postulación PENDIENTE (24/11).
+    public static function cancelarPostulacion(array $parametros): void
+    {
+        $sesion = Auth::requerirRol(['CLIENTE']);
+        Auth::verificarCsrf($sesion);
+        $clienteId = (int) $sesion['id'];
+
+        $id = ParametroRuta::entero($parametros, 'id');
+        $repositorio = self::repositorio();
+        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->cancelarPostulacion($id, $clienteId);
+
+        if ($resultado === 'NO_EXISTE') {
+            Response::error('Postulación no encontrada', 404);
+            return;
+        }
+        if ($resultado === 'ESTADO') {
+            Response::error('Solo se puede cancelar una postulación que la rescatista todavía no revisó', 409);
+            return;
+        }
+
+        Logger::info("Adopciones: el cliente $clienteId canceló la postulación $id");
+        $postulacion = $repositorio->postulacion($id);
+        $adopcion = $repositorio->adopcion((int) $postulacion['adopcion_id']);
+
+        // Aviso a la rescatista (si Backend no responde, la cancelación queda igual).
+        AvisosAdopcion::enviar(AvisosAdopcion::postulacionCancelada(
+            $id,
+            (int) $adopcion['rescatista_id'],
+            $postulacion['cliente_nombre'],
+            $postulacion['mascota_nombre']
+        ));
+
+        Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)]);
+    }
+
     private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId): void
     {
         Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId)");

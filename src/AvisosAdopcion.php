@@ -48,6 +48,17 @@ class AvisosAdopcion
         );
     }
 
+    // El cliente cancela su postulación (24/11): a la rescatista.
+    public static function postulacionCancelada(int $postulacionId, int $rescatistaId, string $cliente, string $mascota): array
+    {
+        return self::aviso(
+            $rescatistaId,
+            'POSTULACION',
+            "$cliente canceló su postulación para adoptar a $mascota.",
+            "postulacion-cancelada-$postulacionId"
+        );
+    }
+
     // La rescatista elige al adoptante: al cliente elegido.
     public static function postulacionElegida(int $postulacionId, int $clienteId, string $mascota): array
     {

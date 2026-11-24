@@ -453,6 +453,44 @@ class AdopcionRepositorio
         });
     }
 
+    // El cliente cancela su postulación (24/11): solo la suya y mientras está PENDIENTE (la rescatista
+    // todavía no eligió). Queda CANCELADA; si era la única pendiente, la adopción vuelve a PUBLICADA.
+    // Devuelve NO_EXISTE (no existe o es de otro cliente), ESTADO u OK.
+    public function cancelarPostulacion(int $postulacionId, int $clienteId): string
+    {
+        return $this->enTransaccion(function () use ($postulacionId, $clienteId): string {
+            $postulacion = $this->fila(
+                'SELECT po.estado, po.cliente_id, po.adopcion_id, a.estado AS adopcion_estado
+                 FROM postulacion po JOIN adopcion a ON a.id = po.adopcion_id
+                 WHERE po.id = ? FOR UPDATE',
+                [$postulacionId]
+            );
+
+            if ($postulacion === null || (int) $postulacion['cliente_id'] !== $clienteId) {
+                return 'NO_EXISTE';
+            }
+
+            if ($postulacion['estado'] !== 'PENDIENTE') {
+                return 'ESTADO';
+            }
+
+            $this->ejecutar("UPDATE postulacion SET estado = 'CANCELADA' WHERE id = ?", [$postulacionId]);
+
+            $quedan = $this->fila(
+                "SELECT COUNT(*) AS n FROM postulacion WHERE adopcion_id = ? AND estado = 'PENDIENTE'",
+                [$postulacion['adopcion_id']]
+            );
+            if ($postulacion['adopcion_estado'] === 'CON_POSTULANTES' && (int) $quedan['n'] === 0) {
+                $this->ejecutar(
+                    "UPDATE adopcion SET estado = 'PUBLICADA' WHERE id = ? AND estado = 'CON_POSTULANTES'",
+                    [$postulacion['adopcion_id']]
+                );
+            }
+
+            return 'OK';
+        });
+    }
+
     public function postulacion(int $id): ?array
     {
         $filas = $this->filas(self::SELECT_POSTULACION . ' WHERE po.id = ?', [$id]);
