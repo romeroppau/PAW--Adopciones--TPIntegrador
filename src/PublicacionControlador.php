@@ -246,6 +246,12 @@ class PublicacionControlador
             return [$fila, true];
         }
 
+        // El cliente que se postuló la sigue viendo aunque ya no esté disponible (la rescatista eligió
+        // adoptante, o la adopción terminó): la abre desde "Mis postulaciones".
+        if ($rol === 'CLIENTE' && self::repositorio()->clientePostulado((int) $fila['id'], (int) $sesion['id'])) {
+            return [$fila, false];
+        }
+
         return AdopcionRepositorio::disponible($fila) ? [$fila, false] : null;
     }
 

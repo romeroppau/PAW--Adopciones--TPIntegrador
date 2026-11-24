@@ -132,7 +132,7 @@ Parámetro opcional `especie`: `PERRO`, `GATO` u `OTRO`.
 - 400: `especie` no es válida.
 
 ### Ver una publicación
-`GET /api/adopciones/publicaciones/{id}` — Público, si está en "Animales disponibles". El rescatista
+`GET /api/adopciones/publicaciones/{id}` — Público, si está en "Animales disponibles". También la ve el cliente que se postuló a su adopción, aunque ya no esté disponible (la abre desde "Mis postulaciones"; Entrega 5). El rescatista
 que la cargó y la veterinaria la ven en cualquier estado.
 - 200: `{"publicacion": { ... }}`
 - 404: no existe, o no está disponible para quien la pide.
