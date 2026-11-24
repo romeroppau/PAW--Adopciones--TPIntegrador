@@ -18,6 +18,7 @@ $router->get('/api/adopciones/moderacion', [PublicacionControlador::class, 'porM
 // Postulaciones, elección, chequeo y cierre
 $router->get('/api/adopciones', [AdopcionControlador::class, 'listar']);
 $router->get('/api/adopciones/mis-postulaciones', [AdopcionControlador::class, 'misPostulaciones']);
+$router->post('/api/adopciones/postulaciones/{id}/cancelar', [AdopcionControlador::class, 'cancelarPostulacion']);
 $router->get('/api/adopciones/{id}/postulaciones', [AdopcionControlador::class, 'postulaciones']);
 $router->post('/api/adopciones/{id}/postulaciones', [AdopcionControlador::class, 'postularse']);
 $router->post('/api/adopciones/{id}/elegir', [AdopcionControlador::class, 'elegir']);
