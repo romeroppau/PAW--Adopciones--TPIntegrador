@@ -110,6 +110,18 @@ class AdopcionRepositorio
         return $filas[0] ?? null;
     }
 
+    // Si el cliente se postuló a la adopción de esa publicación (en cualquier estado).
+    public function clientePostulado(int $publicacionId, int $clienteId): bool
+    {
+        $consulta = $this->db->prepare(
+            'SELECT 1 FROM postulacion po JOIN adopcion a ON a.id = po.adopcion_id
+             WHERE a.publicacion_id = ? AND po.cliente_id = ? LIMIT 1'
+        );
+        $consulta->execute([$publicacionId, $clienteId]);
+
+        return $consulta->fetchColumn() !== false;
+    }
+
     // Si la publicación está en "Animales disponibles" (para el público).
     public static function disponible(array $fila): bool
     {
