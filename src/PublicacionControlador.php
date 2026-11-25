@@ -127,8 +127,9 @@ class PublicacionControlador
         };
     }
 
-    // DELETE /api/adopciones/publicaciones/{id} — el rescatista da de baja la suya. Si tenía una
-    // adopción en curso, se cancela. 204 sin cuerpo.
+    // DELETE /api/adopciones/publicaciones/{id} — el rescatista da de baja la suya. Es la única forma
+    // de cortar una adopción en curso: se cierra, se cancela el turno del chequeo y se avisa a los
+    // postulantes, al adoptante y a la veterinaria. 204 sin cuerpo.
     public static function darDeBaja(array $parametros): void
     {
         $sesion = Auth::requerirRol(['RESCATISTA']);
@@ -149,7 +150,40 @@ class PublicacionControlador
         }
 
         Logger::info("Adopciones: el rescatista $rescatistaId dio de baja la publicación $id");
+        self::despuesDeLaBaja(self::repositorio(), $id, $resultado);
         http_response_code(204);
+    }
+
+    // Lo que sigue a la baja (contrato-adopciones.md, "Dar de baja"): si había un chequeo programado,
+    // se cancela el turno en Pacientes; después, los avisos. Nada de esto deshace la baja si falla.
+    private static function despuesDeLaBaja(AdopcionRepositorio $repositorio, int $id, array $baja): void
+    {
+        $turnoCancelado = null;
+        $turno = $baja['turno'];
+
+        if ($turno !== null && $baja['estado'] === 'CHEQUEO_PENDIENTE' && $turno['estado'] === 'PROGRAMADO') {
+            $turnoCancelado = ClientePacientes::cancelarChequeo($turno['id']);
+            if (!$turnoCancelado) {
+                Logger::error("Adopciones: no se pudo cancelar el turno {$turno['id']} del chequeo de la publicación $id");
+            }
+        }
+
+        if ($baja['postulantes'] === [] && $baja['adoptante_id'] === null) {
+            return;
+        }
+
+        $publicacion = $repositorio->publicacion($id);
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(
+            $id,
+            $baja,
+            $baja['adoptante_id'] === null ? [] : $repositorio->veterinarias(),
+            (string) $publicacion['rescatista_nombre'],
+            $turnoCancelado
+        );
+
+        foreach ($avisos as $aviso) {
+            AvisosAdopcion::enviar($aviso);
+        }
     }
 
     private static function respuestaPublicacion(AdopcionRepositorio $repositorio, int $id, string $evento): void
