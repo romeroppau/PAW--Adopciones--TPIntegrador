@@ -73,6 +73,22 @@ class AvisosAdopcion
         );
     }
 
+    // La rescatista elige al adoptante: a cada veterinaria, para que coordine y cargue el turno del
+    // chequeo (si no, se entera recién cuando revisa las adopciones en curso). Va el WhatsApp del
+    // adoptante, si lo tiene, porque el turno se coordina por ahí. El id_operacion lleva la postulación:
+    // si la adopción vuelve a tener que elegir y elige a otro, es otro aviso.
+    public static function chequeoPorCoordinar(int $postulacionId, int $veterinariaId, string $adoptante, string $mascota, ?string $telefono): array
+    {
+        $contacto = $telefono === null || trim($telefono) === '' ? '' : " (WhatsApp $telefono)";
+
+        return self::aviso(
+            $veterinariaId,
+            'POSTULACION',
+            "Eligieron a $adoptante$contacto para adoptar a $mascota y espera el turno del chequeo. Coordinalo, cargalo en la Agenda y asignalo en Adopción → Adopciones en curso.",
+            "postulacion-elegida-$postulacionId-vet-$veterinariaId"
+        );
+    }
+
     // La veterinaria asigna el turno del chequeo (o lo reprograma): al adoptante y a la rescatista,
     // por la campana y por WhatsApp. Un aviso por persona y por canal, cada uno con su id_operacion;
     // si se reprograma, el turno nuevo tiene otro id y el aviso vuelve a salir.

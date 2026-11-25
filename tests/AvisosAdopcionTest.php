@@ -68,6 +68,26 @@ final class AvisosAdopcionTest extends TestCase
         $this->assertStringContainsString('Te eligieron para adoptar a Pipa', $aviso['mensaje']);
     }
 
+    public function testElegirLeAvisaACadaVeterinariaQueHayUnChequeoPorCoordinar(): void
+    {
+        $aviso = AvisosAdopcion::chequeoPorCoordinar(7, 101, 'Cliente Dos', 'Pipa', '1145678901');
+
+        $this->assertSame(101, $aviso['usuario_id']);
+        $this->assertSame('POSTULACION', $aviso['tipo']);
+        $this->assertSame('WEB', $aviso['canal']);
+        $this->assertSame('postulacion-elegida-7-vet-101', $aviso['id_operacion']);
+        $this->assertStringContainsString('Eligieron a Cliente Dos (WhatsApp 1145678901) para adoptar a Pipa', $aviso['mensaje']);
+        $this->assertStringContainsString('turno del chequeo', $aviso['mensaje']);
+    }
+
+    public function testSiElAdoptanteNoTieneTelefonoElAvisoNoLoMenciona(): void
+    {
+        $aviso = AvisosAdopcion::chequeoPorCoordinar(7, 101, 'Cliente Dos', 'Pipa', null);
+
+        $this->assertStringContainsString('Eligieron a Cliente Dos para adoptar a Pipa', $aviso['mensaje']);
+        $this->assertStringNotContainsString('WhatsApp', $aviso['mensaje']);
+    }
+
     public function testElTurnoDelChequeoLeAvisaAlAdoptanteYALaRescatistaPorLosDosCanales(): void
     {
         $avisos = AvisosAdopcion::chequeoAsignado(101, 120, 103, 104, 'Cliente Dos', 'Pipa', '2026-11-26', '10:00:00');
