@@ -412,7 +412,10 @@ class AdopcionRepositorio
         };
     }
 
-    // Devuelve [resultado, id]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
+    // Devuelve [resultado, id, volvio]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
+    // Si el cliente había cancelado su postulación a esta adopción, puede volver a postularse (24/11):
+    // la misma fila vuelve a PENDIENTE con los datos nuevos y la fecha de hoy (volvio = true). Así se
+    // mantiene una sola postulación por cliente y adopción (índice único de la migración 007).
     public function postularse(int $adopcionId, int $clienteId, array $datos, string $ahora): array
     {
         return $this->enTransaccion(function () use ($adopcionId, $clienteId, $datos, $ahora): array {
@@ -423,11 +426,33 @@ class AdopcionRepositorio
                 $publicacion === null || $publicacion['estado_moderacion'] !== 'APROBADA'
                 || (int) $publicacion['activa'] !== 1 || (int) $publicacion['mascota_activa'] !== 1
             ) {
-                return ['NO_EXISTE', null];
+                return ['NO_EXISTE', null, false];
             }
 
             if (!in_array($adopcion['estado'], ['PUBLICADA', 'CON_POSTULANTES'], true)) {
-                return ['ESTADO', null];
+                return ['ESTADO', null, false];
+            }
+
+            $anterior = $this->fila(
+                'SELECT id, estado FROM postulacion WHERE adopcion_id = ? AND cliente_id = ? FOR UPDATE',
+                [$adopcionId, $clienteId]
+            );
+            if ($anterior !== null && $anterior['estado'] !== 'CANCELADA') {
+                return ['YA_POSTULADO', null, false];
+            }
+
+            if ($anterior !== null) {
+                $id = (int) $anterior['id'];
+                $this->ejecutar(
+                    "UPDATE postulacion SET estado = 'PENDIENTE', tipo_vivienda = ?, otras_mascotas = ?,
+                       tiempo_disponible = ?, fecha = ? WHERE id = ?",
+                    [$datos['tipo_vivienda'], $datos['otras_mascotas'], $datos['tiempo_disponible'], $ahora, $id]
+                );
+                if ($adopcion['estado'] === 'PUBLICADA') {
+                    $this->ejecutar("UPDATE adopcion SET estado = 'CON_POSTULANTES' WHERE id = ?", [$adopcionId]);
+                }
+
+                return ['OK', $id, true];
             }
 
             try {
@@ -438,7 +463,7 @@ class AdopcionRepositorio
                 );
             } catch (PDOException $error) {
                 if (self::esDuplicado($error)) {
-                    return ['YA_POSTULADO', null];
+                    return ['YA_POSTULADO', null, false];
                 }
                 throw $error;
             }
@@ -449,7 +474,7 @@ class AdopcionRepositorio
                 $this->ejecutar("UPDATE adopcion SET estado = 'CON_POSTULANTES' WHERE id = ?", [$adopcionId]);
             }
 
-            return ['OK', $id];
+            return ['OK', $id, false];
         });
     }
 

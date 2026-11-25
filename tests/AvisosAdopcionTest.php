@@ -41,12 +41,21 @@ final class AvisosAdopcionTest extends TestCase
 
     public function testCancelarLaPostulacionLeAvisaALaRescatista(): void
     {
-        $aviso = AvisosAdopcion::postulacionCancelada(7, 104, 'Cliente Dos', 'Pipa');
+        $aviso = AvisosAdopcion::postulacionCancelada(7, 104, 'Cliente Dos', 'Pipa', '20261124183000');
 
         $this->assertSame(104, $aviso['usuario_id']);
         $this->assertSame('POSTULACION', $aviso['tipo']);
-        $this->assertSame('postulacion-cancelada-7', $aviso['id_operacion']);
+        $this->assertSame('postulacion-cancelada-7-20261124183000', $aviso['id_operacion']);
         $this->assertSame('Cliente Dos canceló su postulación para adoptar a Pipa.', $aviso['mensaje']);
+    }
+
+    public function testSiVuelveAPostularseElAvisoTieneOtroIdOperacion(): void
+    {
+        $this->assertSame('postulacion-nueva-7', AvisosAdopcion::postulacionNueva(7, 104, 'Cliente Dos', 'Pipa')['id_operacion']);
+        $this->assertSame(
+            'postulacion-nueva-7-20261124190000',
+            AvisosAdopcion::postulacionNueva(7, 104, 'Cliente Dos', 'Pipa', '20261124190000')['id_operacion']
+        );
     }
 
     public function testElegirLeAvisaAlClienteElegido(): void
