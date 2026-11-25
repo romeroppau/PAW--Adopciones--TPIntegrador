@@ -138,12 +138,14 @@ class AdopcionRepositorio
         return $this->filas(
             'SELECT pr.id, pr.motivo, pr.rechazada_en, v.nombre AS veterinaria_nombre,
                     p.id AS publicacion_id, p.titulo, p.estado_moderacion, p.activa,
+                    a.estado AS adopcion_estado,
                     m.id AS mascota_id, m.nombre AS mascota_nombre, m.especie,
                     r.id AS rescatista_id, r.nombre AS rescatista_nombre, r.organizacion
              FROM publicacion_rechazo pr
              JOIN publicacion p ON p.id = pr.publicacion_id
              JOIN mascota m ON m.id = p.mascota_id
              JOIN usuario r ON r.id = p.rescatista_id
+             LEFT JOIN adopcion a ON a.publicacion_id = p.id
              LEFT JOIN usuario v ON v.id = pr.rechazada_por'
             . $donde . ' ORDER BY pr.rechazada_en DESC, pr.id DESC LIMIT 100',
             $parametros
@@ -187,6 +189,9 @@ class AdopcionRepositorio
                 // Cómo está ahora: PENDIENTE si la corrigieron, APROBADA si después se aprobó.
                 'estado_moderacion' => $f['estado_moderacion'],
                 'activa' => (int) $f['activa'] === 1,
+                // Si después se aprobó, en qué quedó su adopción (FINALIZADA = adoptado). Una
+                // publicación con la adopción terminada queda inactiva, pero no "dada de baja".
+                'adopcion_estado' => $f['adopcion_estado'] ?? null,
             ],
             'mascota' => ['id' => (int) $f['mascota_id'], 'nombre' => $f['mascota_nombre'], 'especie' => $f['especie']],
             'rescatista' => ['id' => (int) $f['rescatista_id'], 'nombre' => $f['rescatista_nombre'], 'organizacion' => $f['organizacion']],
