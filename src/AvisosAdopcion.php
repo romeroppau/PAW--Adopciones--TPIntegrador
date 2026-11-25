@@ -38,24 +38,27 @@ class AvisosAdopcion
     }
 
     // Llega una postulación: a la rescatista.
-    public static function postulacionNueva(int $postulacionId, int $rescatistaId, string $cliente, string $mascota): array
+    // $cuando (AAAAMMDDHHMMSS): solo si volvió a postularse después de cancelar, para que el id_operacion
+    // sea otro y Backend no lo tome como un reintento del primer aviso.
+    public static function postulacionNueva(int $postulacionId, int $rescatistaId, string $cliente, string $mascota, ?string $cuando = null): array
     {
         return self::aviso(
             $rescatistaId,
             'POSTULACION',
             "$cliente se postuló para adoptar a $mascota. Revisá la postulación en Mis publicaciones.",
-            "postulacion-nueva-$postulacionId"
+            "postulacion-nueva-$postulacionId" . ($cuando === null ? '' : "-$cuando")
         );
     }
 
-    // El cliente cancela su postulación (24/11): a la rescatista.
-    public static function postulacionCancelada(int $postulacionId, int $rescatistaId, string $cliente, string $mascota): array
+    // El cliente cancela su postulación (24/11): a la rescatista. $cuando (AAAAMMDDHHMMSS) va en el
+    // id_operacion porque puede volver a postularse y cancelar otra vez.
+    public static function postulacionCancelada(int $postulacionId, int $rescatistaId, string $cliente, string $mascota, string $cuando): array
     {
         return self::aviso(
             $rescatistaId,
             'POSTULACION',
             "$cliente canceló su postulación para adoptar a $mascota.",
-            "postulacion-cancelada-$postulacionId"
+            "postulacion-cancelada-$postulacionId-$cuando"
         );
     }
 

@@ -63,8 +63,9 @@ Cualquier estado antes de FINALIZADA ──(cancelar)──► CANCELADA
 **Postulación:** `PENDIENTE` → `ELEGIDA`, `RECHAZADA` o `CANCELADA`. Al elegir una, las demás de esa
 adopción quedan `RECHAZADA` en la misma transacción (también al cancelarse la adopción o darse de baja
 la publicación: en las pantallas, "cancelada por la rescatista"). `CANCELADA` (24/11, migración 021):
-la canceló el cliente mientras estaba `PENDIENTE` ("cancelada por el postulante"). Un cliente se
-postula una sola vez por adopción, aunque haya cancelado.
+la canceló el cliente mientras estaba `PENDIENTE` ("cancelada por el postulante"). Un cliente tiene
+una sola postulación por adopción; si la canceló, puede volver a postularse: esa misma postulación
+vuelve a `PENDIENTE` con los datos nuevos y la fecha de ese momento.
 
 ---
 
@@ -225,7 +226,8 @@ La primera postulación pasa la adopción de `PUBLICADA` a `CON_POSTULANTES`.
 - 201: `{"postulacion": { ... }}` en `PENDIENTE`.
 - 400: datos inválidos.
 - 404: la adopción no existe o su publicación no está disponible.
-- 409: ya se postuló a esta adopción, o la adopción no está `PUBLICADA` ni `CON_POSTULANTES`.
+- 409: ya se postuló a esta adopción (y no la canceló), o la adopción no está `PUBLICADA` ni `CON_POSTULANTES`.
+- Si había cancelado su postulación, vuelve a `PENDIENTE` (201, con el mismo `id`).
 
 ### Forma de la postulación
 
@@ -252,7 +254,8 @@ asignado: `{"fecha": "2026-11-26", "hora": "10:00", "estado": "PROGRAMADO"}` (si
 ### Cancelar mi postulación
 `POST /api/adopciones/postulaciones/{id}/cancelar` — Cliente (con CSRF). `{id}` es la postulación.
 Solo la suya y mientras está `PENDIENTE`. Queda `CANCELADA`; si era la única pendiente, la adopción
-vuelve de `CON_POSTULANTES` a `PUBLICADA`. Se le avisa a la rescatista. No se puede volver a postular.
+vuelve de `CON_POSTULANTES` a `PUBLICADA`. Se le avisa a la rescatista. Puede volver a postularse
+mientras la adopción siga recibiendo postulaciones.
 - 200: `{"postulacion": { ... }}` en `CANCELADA`.
 - 404: no existe o es de otro cliente.
 - 409: ya no está `PENDIENTE` (la rescatista eligió, o ya se canceló).
@@ -403,8 +406,8 @@ tiempo máximo de 3 segundos.
 | La rescatista publica un animal | Cada veterinaria | `POSTULACION` | `publicacion-nueva-{publicacion}-vet-{veterinaria}` |
 | La veterinaria aprueba la publicación | Rescatista | `POSTULACION` | `publicacion-{publicacion}-aprobada` |
 | La veterinaria rechaza la publicación (con el motivo) | Rescatista | `POSTULACION` | `publicacion-{publicacion}-rechazada-{AAAAMMDDHHMMSS}` |
-| Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` |
-| El cliente cancela su postulación | Rescatista | `POSTULACION` | `postulacion-cancelada-{postulacion}` |
+| Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` (si vuelve a postularse después de cancelar, con `-{AAAAMMDDHHMMSS}`) |
+| El cliente cancela su postulación | Rescatista | `POSTULACION` | `postulacion-cancelada-{postulacion}-{AAAAMMDDHHMMSS}` |
 | El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
 | La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
 | Se completa la adopción | Adoptante | `CONTROL_ADOPCION` | `adopcion-finalizada-{adopcion}` |

@@ -75,13 +75,13 @@ class AdopcionControlador
         }
 
         $repositorio = self::repositorio();
-        [$resultado, $postulacionId] = $repositorio->postularse($id, $clienteId, $datos, date('Y-m-d H:i:s'));
+        [$resultado, $postulacionId, $volvio] = $repositorio->postularse($id, $clienteId, $datos, date('Y-m-d H:i:s'));
 
         match ($resultado) {
             'NO_EXISTE' => Response::error('Adopción no encontrada', 404),
             'ESTADO' => Response::error('La adopción ya no recibe postulaciones', 409),
             'YA_POSTULADO' => Response::error('Ya te postulaste a esta adopción', 409),
-            default => self::postulado($repositorio, $postulacionId, $clienteId, $id),
+            default => self::postulado($repositorio, $postulacionId, $clienteId, $id, $volvio),
         };
     }
 
@@ -114,24 +114,29 @@ class AdopcionControlador
             $id,
             (int) $adopcion['rescatista_id'],
             $postulacion['cliente_nombre'],
-            $postulacion['mascota_nombre']
+            $postulacion['mascota_nombre'],
+            date('YmdHis')
         ));
 
         Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)]);
     }
 
-    private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId): void
+    private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId, bool $volvio): void
     {
-        Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId)");
+        Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId"
+            . ($volvio ? ', de nuevo después de cancelar' : '') . ')');
         $postulacion = $repositorio->postulacion($postulacionId);
         $adopcion = $repositorio->adopcion($adopcionId);
 
         // Aviso a la rescatista (si Backend no responde, la postulación queda igual).
+        // Si volvió a postularse, el aviso lleva la fecha en su id_operacion (si no, Backend lo tomaría
+        // como un reintento del primero y no lo mandaría).
         AvisosAdopcion::enviar(AvisosAdopcion::postulacionNueva(
             $postulacionId,
             (int) $adopcion['rescatista_id'],
             $postulacion['cliente_nombre'],
-            $postulacion['mascota_nombre']
+            $postulacion['mascota_nombre'],
+            $volvio ? date('YmdHis') : null
         ));
 
         Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)], 201);
