@@ -208,6 +208,17 @@ class AdopcionControlador
             $postulacion['mascota_nombre']
         ));
 
+        // Aviso a cada veterinaria: hay un adoptante esperando el turno del chequeo.
+        foreach ($repositorio->veterinarias() as $veterinariaId) {
+            AvisosAdopcion::enviar(AvisosAdopcion::chequeoPorCoordinar(
+                $postulacionId,
+                $veterinariaId,
+                (string) $postulacion['cliente_nombre'],
+                (string) $postulacion['mascota_nombre'],
+                $postulacion['cliente_telefono'] ?? null
+            ));
+        }
+
         self::responderConPostulaciones($repositorio, $repositorio->adopcion($id), true);
     }
 

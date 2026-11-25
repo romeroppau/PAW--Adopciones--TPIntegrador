@@ -465,6 +465,7 @@ tiempo máximo de 3 segundos.
 | Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` (si vuelve a postularse después de cancelar, con `-{AAAAMMDDHHMMSS}`) |
 | El cliente cancela su postulación | Rescatista | `POSTULACION` | `postulacion-cancelada-{postulacion}-{AAAAMMDDHHMMSS}` |
 | El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
+| Lo mismo | Cada veterinaria, para que coordine y cargue el turno del chequeo (con el WhatsApp del adoptante, si lo tiene) | `POSTULACION` | `postulacion-elegida-{postulacion}-vet-{veterinaria}` |
 | La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
 | Se completa la adopción | Adoptante | `CONTROL_ADOPCION` | `adopcion-finalizada-{adopcion}` |
 | La rescatista da de baja una publicación con postulantes | Cada postulante pendiente | `POSTULACION` | `baja-{publicacion}-postulante-{cliente}` |
