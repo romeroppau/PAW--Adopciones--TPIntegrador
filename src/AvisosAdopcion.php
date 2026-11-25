@@ -189,13 +189,13 @@ class AvisosAdopcion
         return true;
     }
 
-    // "2026-11-26" y "10:00:00" → "jueves 26/11 a las 10:00".
+    // "2026-11-26" y "10:00:00" → "jueves 26/11/2026 a las 10:00".
     public static function cuando(string $fecha, string $hora): string
     {
         $dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
         $momento = strtotime($fecha . ' 12:00:00');
 
-        return $dias[(int) date('w', $momento)] . ' ' . date('d/m', $momento) . ' a las ' . substr($hora, 0, 5);
+        return $dias[(int) date('w', $momento)] . ' ' . date('d/m/Y', $momento) . ' a las ' . substr($hora, 0, 5);
     }
 
     private static function aviso(int $usuarioId, string $tipo, string $mensaje, string $idOperacion, string $canal = 'WEB'): array
