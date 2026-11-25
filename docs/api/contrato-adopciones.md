@@ -72,14 +72,24 @@ vuelve a `PENDIENTE` con los datos nuevos y la fecha de ese momento.
 ## 1. Validación de rescatistas (Backend)
 
 ### Listar rescatistas
-`GET /api/rescatistas` — Veterinario. Parámetro opcional `estado`: `PENDIENTE` (por defecto),
-`APROBADO`, `RECHAZADO` o `TODOS`. Ordenados por id (los más viejos primero, hasta 100).
-- 200: `{"rescatistas": [{"id": 105, "nombre": "Rescatista Pendiente", "email": "rescatista2@prueba.huellavet", "telefono": "1155550105", "organizacion": "Patitas al Rescate", "estado_validacion": "PENDIENTE"}]}`
-- 400: `estado` no es uno de los cuatro.
+`GET /api/rescatistas` — Veterinario. Parámetros opcionales: `estado` (`PENDIENTE` por defecto,
+`APROBADO`, `RECHAZADO` o `TODOS`), `buscar` (nombre, email u organización) y `desde`/`hasta`
+(`AAAA-MM-DD`, el día en que se lo validó). Los pendientes, los más viejos primero; los aprobados y
+rechazados, los validados más recientemente primero (hasta 100).
+- 200: `{"rescatistas": [{"id": 105, "nombre": "Rescatista Pendiente", "email": "rescatista2@prueba.huellavet", "telefono": "1155550105", "organizacion": "Patitas al Rescate", "estado_validacion": "PENDIENTE", "validado_en": null, "motivo_rechazo": null}]}`
+- 400: `estado` no es uno de los cuatro, o un filtro no es válido.
+
+### Perfil de un rescatista
+`GET /api/rescatistas/{id}` — Veterinario. `{"rescatista": { ... }}` (la misma forma). Sus
+publicaciones: `GET /api/adopciones/moderacion?estado=TODAS&rescatista_id={id}`; sus rechazos:
+`GET /api/adopciones/rechazos?rescatista_id={id}`.
 
 ### Aprobar o rechazar
-`POST /api/rescatistas/{id}/aprobar` y `POST /api/rescatistas/{id}/rechazar` — Veterinario. Sin cuerpo.
+`POST /api/rescatistas/{id}/aprobar` (sin cuerpo) y `POST /api/rescatistas/{id}/rechazar`
+(`{"motivo": "..."}`, de 3 a 255 caracteres; lo recibe el rescatista en el aviso) — Veterinario.
+Se guarda la fecha y hora (`validado_en`) y quién lo decidió (migración 022 del Gateway).
 - 200: `{"rescatista": { ... }}` con el estado nuevo.
+- 400: falta el motivo al rechazar, o es muy corto o muy largo.
 - 404: no existe o no es un rescatista.
 - 409: no está `PENDIENTE` (`"El rescatista ya fue aprobado"` o `"… rechazado"`).
 
@@ -125,7 +135,9 @@ deja de mostrar esa publicación (filtra por `mascota.activo`) y no deja aprobar
   "adopcion": { "id": 101, "estado": "CON_POSTULANTES" }
 }
 ```
-`adopcion` es `null` mientras la publicación no se aprobó. La foto no viaja en la publicación: se pide
+`adopcion` es `null` mientras la publicación no se aprobó; `aprobada_en` es cuándo se aprobó (`null`
+si no). En las listas de la veterinaria (`/api/adopciones/moderacion`) suma `veces_rechazada`: cuántas
+veces se rechazó, según el historial. La foto no viaja en la publicación: se pide
 aparte. Para el rescatista y la veterinaria, `adopcion` suma `postulaciones_pendientes` (cantidad).
 
 ### Animales disponibles
@@ -190,10 +202,37 @@ rechazadas). La mascota sigue a cargo del rescatista y la puede volver a publica
 
 ## 4. Moderación (Adopciones, veterinaria)
 
-### Publicaciones por moderar
-`GET /api/adopciones/moderacion` — Veterinario. Las publicaciones `PENDIENTE` y activas, de la más
-vieja a la más nueva.
+### Publicaciones por moderar, aprobadas y de un rescatista
+`GET /api/adopciones/moderacion` — Veterinario. Parámetros opcionales:
+- `estado`: `PENDIENTE` (por defecto: las pendientes y activas, de la más vieja a la más nueva),
+  `APROBADA` (las aprobadas, las aprobadas más recientemente primero) o `TODAS` (también las dadas de
+  baja y las rechazadas, las más nuevas primero: el perfil del rescatista).
+- `buscar`: mascota, rescatista, organización o título (hasta 60 caracteres).
+- `desde`/`hasta` (`AAAA-MM-DD`, inclusive): el día en que se publicó (`PENDIENTE`, `TODAS`) o se aprobó (`APROBADA`).
+- `rescatista_id`: solo las de ese rescatista.
+
+Hasta 100.
 - 200: `{"publicaciones": [ ... ]}`
+- 400: `{"error": "Los filtros no son válidos", "campos": { ... }}`.
+
+### Historial de rechazos
+`GET /api/adopciones/rechazos` — Veterinario. Cada rechazo de una publicación, los más nuevos
+primero, aunque después la hayan corregido y aprobado (tabla `publicacion_rechazo`, migración 023).
+Filtros opcionales: `buscar` (mascota, rescatista, organización, título o motivo), `desde`/`hasta` (el
+día del rechazo) y `rescatista_id`. Hasta 100.
+- 200:
+```json
+{"rechazos": [{
+  "id": 3, "motivo": "La foto no se ve bien", "rechazada_en": "2026-11-24 10:35:12",
+  "veterinaria": "Dra. Laura Martínez",
+  "publicacion": { "id": 101, "titulo": "Pipa busca familia", "estado_moderacion": "APROBADA", "activa": true },
+  "mascota": { "id": 902, "nombre": "Pipa", "especie": "GATO" },
+  "rescatista": { "id": 104, "nombre": "Rescatista Aprobada", "organizacion": "Refugio Huellitas" }
+}]}
+```
+`veterinaria` es `null` en los rechazos de antes de la migración 023 (se pasaron al historial con la
+fecha en que se publicó). `publicacion.estado_moderacion` es cómo está ahora.
+- 400: como en la moderación.
 
 ### Aprobar
 `POST /api/adopciones/publicaciones/{id}/aprobar` — Veterinario. Sin cuerpo. En una transacción:
@@ -205,6 +244,7 @@ la publicación queda `APROBADA` y se crea su adopción en `PUBLICADA`.
 ### Rechazar
 `POST /api/adopciones/publicaciones/{id}/rechazar` — Veterinario. `{"motivo": "La foto no se ve bien"}`
 (de 3 a 255 caracteres). El rescatista lo ve en "Mis publicaciones" y puede editarla para que vuelva a la moderación.
+Cada rechazo queda además en el historial, con la fecha y hora y la veterinaria.
 - 200: `{"publicacion": { ... }}` en `RECHAZADA`.
 - 400: falta el motivo o es muy largo.
 - 404 / 409: igual que al aprobar.

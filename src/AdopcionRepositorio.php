@@ -13,7 +13,7 @@ class AdopcionRepositorio
         m.activo AS mascota_activa, m.duenio_id,
         TIMESTAMPDIFF(MONTH, m.fecha_nacimiento, CURDATE()) AS edad_meses,
         r.nombre AS rescatista_nombre, r.organizacion,
-        a.id AS adopcion_id, a.estado AS adopcion_estado,
+        a.id AS adopcion_id, a.estado AS adopcion_estado, a.fecha_inicio AS aprobada_en,
         (SELECT COUNT(*) FROM postulacion po
           WHERE po.adopcion_id = a.id AND po.estado = 'PENDIENTE') AS postulaciones_pendientes";
 
@@ -82,13 +82,115 @@ class AdopcionRepositorio
         );
     }
 
-    public function porModerar(): array
+    // Las publicaciones para la veterinaria, con los filtros de ValidadorAdopciones::listadoPublicaciones.
+    //   PENDIENTE: la cola de moderación (activas y con la mascota a cargo), las más viejas primero.
+    //   APROBADA:  las aprobadas, las aprobadas más recientemente primero (aprobada_en es cuando se
+    //              creó su adopción, al aprobarla).
+    //   TODAS:     todas, también las dadas de baja (el perfil del rescatista), las más nuevas primero.
+    // desde y hasta filtran por el día en que se publicó (PENDIENTE y TODAS) o se aprobó (APROBADA).
+    // Cada una trae cuántas veces se rechazó (historial de la migración 023). Hasta 100.
+    public function publicacionesModeradas(string $estado, array $filtros): array
     {
+        $condiciones = [];
+        $parametros = [];
+
+        [$columnaFecha, $orden] = match ($estado) {
+            'PENDIENTE' => ['p.creada_en', 'p.creada_en, p.id'],
+            'APROBADA' => ['a.fecha_inicio', 'a.fecha_inicio DESC, p.id DESC'],
+            default => ['p.creada_en', 'p.creada_en DESC, p.id DESC'],
+        };
+
+        if ($estado === 'PENDIENTE') {
+            $condiciones[] = "p.estado_moderacion = 'PENDIENTE' AND p.activa = 1 AND m.activo = 1";
+        } elseif ($estado === 'APROBADA') {
+            $condiciones[] = "p.estado_moderacion = 'APROBADA'";
+        }
+
+        $this->filtrosComunes($filtros, $columnaFecha, '(m.nombre LIKE ? OR r.nombre LIKE ? OR r.organizacion LIKE ? OR p.titulo LIKE ?)', 4, $condiciones, $parametros);
+
+        $donde = $condiciones === [] ? '' : ' WHERE ' . implode(' AND ', $condiciones);
+
         return $this->filas(
-            'SELECT ' . self::COLUMNAS_PUBLICACION . self::DESDE_PUBLICACION
-            . " WHERE p.estado_moderacion = 'PENDIENTE' AND p.activa = 1 AND m.activo = 1"
-            . ' ORDER BY p.creada_en, p.id LIMIT 100'
+            'SELECT ' . self::COLUMNAS_PUBLICACION . ',
+                (SELECT COUNT(*) FROM publicacion_rechazo pr WHERE pr.publicacion_id = p.id) AS veces_rechazada'
+            . self::DESDE_PUBLICACION . $donde . " ORDER BY $orden LIMIT 100",
+            $parametros
         );
+    }
+
+    // El historial de rechazos (migración 023): uno por rechazo, aunque después la publicación se haya
+    // corregido y aprobado. Los más nuevos primero. desde y hasta, por el día del rechazo; buscar, en la
+    // mascota, el rescatista, su organización, el título y el motivo. Hasta 100.
+    public function rechazos(array $filtros): array
+    {
+        $condiciones = [];
+        $parametros = [];
+        $this->filtrosComunes(
+            $filtros,
+            'pr.rechazada_en',
+            '(m.nombre LIKE ? OR r.nombre LIKE ? OR r.organizacion LIKE ? OR p.titulo LIKE ? OR pr.motivo LIKE ?)',
+            5,
+            $condiciones,
+            $parametros
+        );
+        $donde = $condiciones === [] ? '' : ' WHERE ' . implode(' AND ', $condiciones);
+
+        return $this->filas(
+            'SELECT pr.id, pr.motivo, pr.rechazada_en, v.nombre AS veterinaria_nombre,
+                    p.id AS publicacion_id, p.titulo, p.estado_moderacion, p.activa,
+                    m.id AS mascota_id, m.nombre AS mascota_nombre, m.especie,
+                    r.id AS rescatista_id, r.nombre AS rescatista_nombre, r.organizacion
+             FROM publicacion_rechazo pr
+             JOIN publicacion p ON p.id = pr.publicacion_id
+             JOIN mascota m ON m.id = p.mascota_id
+             JOIN usuario r ON r.id = p.rescatista_id
+             LEFT JOIN usuario v ON v.id = pr.rechazada_por'
+            . $donde . ' ORDER BY pr.rechazada_en DESC, pr.id DESC LIMIT 100',
+            $parametros
+        );
+    }
+
+    // desde/hasta sobre $columnaFecha, buscar con $condicionBuscar ($veces "?") y rescatista_id.
+    private function filtrosComunes(array $filtros, string $columnaFecha, string $condicionBuscar, int $veces, array &$condiciones, array &$parametros): void
+    {
+        if (isset($filtros['desde'])) {
+            $condiciones[] = "$columnaFecha >= ?";
+            $parametros[] = $filtros['desde'];
+        }
+        if (isset($filtros['hasta'])) {
+            // Hasta el final de ese día, sin envolver la columna en DATE() (así usa el índice).
+            $condiciones[] = "$columnaFecha < ? + INTERVAL 1 DAY";
+            $parametros[] = $filtros['hasta'];
+        }
+        if (isset($filtros['buscar'])) {
+            $condiciones[] = $condicionBuscar;
+            $patron = '%' . addcslashes($filtros['buscar'], '%_\\') . '%';
+            array_push($parametros, ...array_fill(0, $veces, $patron));
+        }
+        if (isset($filtros['rescatista_id'])) {
+            $condiciones[] = 'p.rescatista_id = ?';
+            $parametros[] = $filtros['rescatista_id'];
+        }
+    }
+
+    public static function formatoRechazo(array $f): array
+    {
+        return [
+            'id' => (int) $f['id'],
+            'motivo' => $f['motivo'],
+            'rechazada_en' => $f['rechazada_en'],
+            // null en los rechazos de antes de la migración 023 (no se guardaba quién).
+            'veterinaria' => $f['veterinaria_nombre'],
+            'publicacion' => [
+                'id' => (int) $f['publicacion_id'],
+                'titulo' => $f['titulo'],
+                // Cómo está ahora: PENDIENTE si la corrigieron, APROBADA si después se aprobó.
+                'estado_moderacion' => $f['estado_moderacion'],
+                'activa' => (int) $f['activa'] === 1,
+            ],
+            'mascota' => ['id' => (int) $f['mascota_id'], 'nombre' => $f['mascota_nombre'], 'especie' => $f['especie']],
+            'rescatista' => ['id' => (int) $f['rescatista_id'], 'nombre' => $f['rescatista_nombre'], 'organizacion' => $f['organizacion']],
+        ];
     }
 
     // Las cuentas de la veterinaria: a quiénes se avisa que hay una publicación por revisar.
@@ -192,9 +294,10 @@ class AdopcionRepositorio
     // Aprobar (motivo null) o rechazar una publicación PENDIENTE y activa.
     // Al aprobar se crea su adopción en PUBLICADA, en la misma transacción.
     // Devuelve OK, NO_EXISTE, NO_PENDIENTE o MASCOTA_NO_DISPONIBLE.
-    public function moderar(int $id, ?string $motivo, string $ahora): string
+    // Cada rechazo queda además en el historial (publicacion_rechazo), con la veterinaria que lo hizo.
+    public function moderar(int $id, ?string $motivo, string $ahora, ?int $veterinariaId = null): string
     {
-        return $this->enTransaccion(function () use ($id, $motivo, $ahora): string {
+        return $this->enTransaccion(function () use ($id, $motivo, $ahora, $veterinariaId): string {
             $publicacion = $this->fila(
                 'SELECT estado_moderacion, activa, mascota_id, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE',
                 [$id]
@@ -212,6 +315,10 @@ class AdopcionRepositorio
                 $this->ejecutar(
                     "UPDATE publicacion SET estado_moderacion = 'RECHAZADA', motivo_rechazo = ? WHERE id = ?",
                     [$motivo, $id]
+                );
+                $this->ejecutar(
+                    'INSERT INTO publicacion_rechazo (publicacion_id, motivo, rechazada_en, rechazada_por) VALUES (?, ?, ?, ?)',
+                    [$id, $motivo, $ahora, $veterinariaId]
                 );
                 return 'OK';
             }
@@ -714,6 +821,8 @@ class AdopcionRepositorio
             'motivo_rechazo' => $f['motivo_rechazo'],
             'activa' => (int) $f['activa'] === 1,
             'creada_en' => $f['creada_en'],
+            // Cuándo la aprobó la veterinaria (se crea su adopción): null si no se aprobó.
+            'aprobada_en' => $f['aprobada_en'] ?? null,
             'mascota' => [
                 'id' => (int) $f['mascota_id'],
                 'nombre' => $f['mascota_nombre'],
@@ -728,7 +837,7 @@ class AdopcionRepositorio
                 'organizacion' => $f['organizacion'],
             ],
             'adopcion' => $adopcion,
-        ];
+        ] + (isset($f['veces_rechazada']) ? ['veces_rechazada' => (int) $f['veces_rechazada']] : []);
     }
 
     public static function formatoAdopcion(array $f): array
