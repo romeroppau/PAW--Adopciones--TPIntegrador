@@ -225,13 +225,16 @@ día del rechazo) y `rescatista_id`. Hasta 100.
 {"rechazos": [{
   "id": 3, "motivo": "La foto no se ve bien", "rechazada_en": "2026-11-24 10:35:12",
   "veterinaria": "Dra. Laura Martínez",
-  "publicacion": { "id": 101, "titulo": "Pipa busca familia", "estado_moderacion": "APROBADA", "activa": true },
+  "publicacion": { "id": 101, "titulo": "Pipa busca familia", "estado_moderacion": "APROBADA", "activa": false, "adopcion_estado": "FINALIZADA" },
   "mascota": { "id": 902, "nombre": "Pipa", "especie": "GATO" },
   "rescatista": { "id": 104, "nombre": "Rescatista Aprobada", "organizacion": "Refugio Huellitas" }
 }]}
 ```
 `veterinaria` es `null` en los rechazos de antes de la migración 023 (se pasaron al historial con la
-fecha en que se publicó). `publicacion.estado_moderacion` es cómo está ahora.
+fecha en que se publicó). `publicacion.estado_moderacion` es cómo está ahora, y `adopcion_estado`, en
+qué quedó su adopción si después se aprobó (`null` si no se aprobó). Una publicación inactiva con la
+adopción `FINALIZADA` o `CANCELADA` se cerró con la adopción; inactiva y sin adopción, la dio de baja
+la rescatista.
 - 400: como en la moderación.
 
 ### Aprobar

@@ -178,14 +178,17 @@ final class ValidadorAdopcionesTest extends TestCase
     {
         $rechazo = AdopcionRepositorio::formatoRechazo([
             'id' => '3', 'motivo' => 'La foto no se ve', 'rechazada_en' => '2026-11-24 10:00:00', 'veterinaria_nombre' => null,
-            'publicacion_id' => '7', 'titulo' => 'Rocco busca familia', 'estado_moderacion' => 'APROBADA', 'activa' => '1',
+            'publicacion_id' => '7', 'titulo' => 'Rocco busca familia', 'estado_moderacion' => 'APROBADA', 'activa' => '0',
+            'adopcion_estado' => 'FINALIZADA',
             'mascota_id' => '30', 'mascota_nombre' => 'Rocco', 'especie' => 'PERRO',
             'rescatista_id' => '109', 'rescatista_nombre' => 'Paula Herrera', 'organizacion' => null,
         ]);
 
         $this->assertSame(3, $rechazo['id']);
         $this->assertSame('APROBADA', $rechazo['publicacion']['estado_moderacion']);
-        $this->assertTrue($rechazo['publicacion']['activa']);
+        // Se aprobó y se adoptó: inactiva, pero con la adopción finalizada (no "dada de baja").
+        $this->assertFalse($rechazo['publicacion']['activa']);
+        $this->assertSame('FINALIZADA', $rechazo['publicacion']['adopcion_estado']);
         $this->assertSame(['id' => 109, 'nombre' => 'Paula Herrera', 'organizacion' => null], $rechazo['rescatista']);
     }
 }
