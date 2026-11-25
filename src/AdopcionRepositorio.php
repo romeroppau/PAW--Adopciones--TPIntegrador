@@ -412,10 +412,12 @@ class AdopcionRepositorio
     //    'adoptante_id', 'adoptante' (nombre), 'turno' => ['id', 'fecha', 'hora', 'estado'] o null]
     public function darDeBaja(int $id, int $rescatistaId, string $ahora): string|array
     {
+        // FOR UPDATE OF: se bloquean solo las filas de Adopciones (publicación y adopción). Las de
+        // mascota, usuario y turno se leen sin bloquear: el usuario de MySQL de Adopciones solo las lee.
         return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string|array {
             $publicacion = $this->fila(
                 'SELECT p.activa, p.rescatista_id, m.nombre AS mascota FROM publicacion p
-                 JOIN mascota m ON m.id = p.mascota_id WHERE p.id = ? FOR UPDATE',
+                 JOIN mascota m ON m.id = p.mascota_id WHERE p.id = ? FOR UPDATE OF p',
                 [$id]
             );
 
@@ -438,7 +440,7 @@ class AdopcionRepositorio
                  FROM adopcion a
                  LEFT JOIN usuario ad ON ad.id = a.adoptante_id
                  LEFT JOIN turno t ON t.id = a.turno_chequeo_id
-                 WHERE a.publicacion_id = ? FOR UPDATE',
+                 WHERE a.publicacion_id = ? FOR UPDATE OF a',
                 [$id]
             );
 
