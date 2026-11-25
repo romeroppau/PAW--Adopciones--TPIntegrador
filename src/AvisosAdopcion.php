@@ -11,7 +11,7 @@ class AvisosAdopcion
         return self::aviso(
             $veterinariaId,
             'POSTULACION',
-            "$rescatista publicó a $mascota para adopción y espera tu revisión. Está en Adopciones y rescatistas → Publicaciones por revisar.",
+            "$rescatista publicó a $mascota para adopción y espera tu revisión. Está en Adopción → Publicaciones.",
             "publicacion-nueva-$publicacionId-vet-$veterinariaId"
         );
     }
