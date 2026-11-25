@@ -14,6 +14,7 @@ $router->post('/api/adopciones/publicaciones/{id}/aprobar', [PublicacionControla
 $router->post('/api/adopciones/publicaciones/{id}/rechazar', [PublicacionControlador::class, 'rechazar']);
 $router->get('/api/adopciones/mis-publicaciones', [PublicacionControlador::class, 'mias']);
 $router->get('/api/adopciones/moderacion', [PublicacionControlador::class, 'porModerar']);
+$router->get('/api/adopciones/rechazos', [PublicacionControlador::class, 'rechazos']);
 
 // Postulaciones, elección, chequeo y cierre
 $router->get('/api/adopciones', [AdopcionControlador::class, 'listar']);

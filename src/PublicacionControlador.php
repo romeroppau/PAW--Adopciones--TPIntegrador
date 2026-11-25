@@ -165,11 +165,36 @@ class PublicacionControlador
         self::responderLista(self::repositorio()->deRescatista((int) $sesion['id']), true);
     }
 
-    // GET /api/adopciones/moderacion — veterinaria: las pendientes, las más viejas primero.
+    // GET /api/adopciones/moderacion?estado=PENDIENTE|APROBADA|TODAS&buscar=&desde=&hasta=&rescatista_id=
+    // — veterinaria. Sin estado, las pendientes (la cola de moderación), las más viejas primero.
     public static function porModerar(): void
     {
         Auth::requerirRol(['VETERINARIO']);
-        self::responderLista(self::repositorio()->porModerar(), true);
+        [$pedido, $errores] = ValidadorAdopciones::listadoPublicaciones(Request::query(), ['PENDIENTE', 'APROBADA', 'TODAS']);
+
+        if ($errores !== []) {
+            Response::error('Los filtros no son válidos', 400, $errores);
+            return;
+        }
+
+        self::responderLista(self::repositorio()->publicacionesModeradas($pedido['estado'], $pedido['filtros']), true);
+    }
+
+    // GET /api/adopciones/rechazos?buscar=&desde=&hasta=&rescatista_id= — veterinaria: el historial de
+    // rechazos de publicaciones, los más nuevos primero.
+    public static function rechazos(): void
+    {
+        Auth::requerirRol(['VETERINARIO']);
+        [$pedido, $errores] = ValidadorAdopciones::listadoPublicaciones(Request::query());
+
+        if ($errores !== []) {
+            Response::error('Los filtros no son válidos', 400, $errores);
+            return;
+        }
+
+        Response::json([
+            'rechazos' => array_map([AdopcionRepositorio::class, 'formatoRechazo'], self::repositorio()->rechazos($pedido['filtros'])),
+        ]);
     }
 
     // POST /api/adopciones/publicaciones/{id}/aprobar
@@ -202,7 +227,7 @@ class PublicacionControlador
         }
 
         $repositorio = self::repositorio();
-        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->moderar($id, $motivo, date('Y-m-d H:i:s'));
+        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->moderar($id, $motivo, date('Y-m-d H:i:s'), (int) $sesion['id']);
 
         match ($resultado) {
             'NO_EXISTE' => Response::error('Publicación no encontrada', 404),
