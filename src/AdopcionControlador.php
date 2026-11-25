@@ -314,24 +314,6 @@ class AdopcionControlador
         self::responderAdopcion($repositorio, $id, 'finalizó: la mascota ' . $adopcion['mascota_id'] . ' pasó al cliente ' . $adopcion['adoptante_id']);
     }
 
-    // POST /api/adopciones/{id}/cancelar — el rescatista de la publicación o la veterinaria.
-    public static function cancelar(array $parametros): void
-    {
-        $sesion = Auth::requerirRol(['RESCATISTA', 'VETERINARIO']);
-        Auth::verificarCsrf($sesion);
-
-        $id = ParametroRuta::entero($parametros, 'id');
-        $rescatistaId = $sesion['rol'] === 'RESCATISTA' ? (int) $sesion['id'] : null;
-        $repositorio = self::repositorio();
-        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->cancelar($id, $rescatistaId, date('Y-m-d H:i:s'));
-
-        match ($resultado) {
-            'NO_EXISTE' => Response::error('Adopción no encontrada', 404),
-            'ESTADO' => Response::error('La adopción ya terminó', 409),
-            default => self::responderAdopcion($repositorio, $id, 'se canceló (usuario ' . $sesion['id'] . ')'),
-        };
-    }
-
     // La adopción, si quien pide la puede ver: la veterinaria todas, el rescatista las suyas.
     private static function adopcionVisible(AdopcionRepositorio $repositorio, array $parametros, array $sesion): ?array
     {

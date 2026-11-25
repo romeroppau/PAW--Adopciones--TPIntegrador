@@ -404,12 +404,22 @@ class AdopcionRepositorio
         });
     }
 
-    // El rescatista da de baja su publicación (baja lógica). Si tenía una adopción en curso, se cancela
-    // igual que con "Cancelar". Devuelve OK, NO_EXISTE o INACTIVA.
-    public function darDeBaja(int $id, int $rescatistaId, string $ahora): string
+    // La rescatista da de baja su publicación activa: deja de verse. Si tenía una adopción en curso, se
+    // cierra (CANCELADA) y sus postulaciones quedan rechazadas. Es la única forma de cortar una adopción.
+    // Devuelve 'NO_EXISTE', 'INACTIVA' o, si salió bien, lo que hace falta para los avisos:
+    //   ['estado' => el de la adopción antes de la baja (null si no se había aprobado),
+    //    'mascota' => nombre, 'postulantes' => ids de los clientes con la postulación pendiente,
+    //    'adoptante_id', 'adoptante' (nombre), 'turno' => ['id', 'fecha', 'hora', 'estado'] o null]
+    public function darDeBaja(int $id, int $rescatistaId, string $ahora): string|array
     {
-        return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string {
-            $publicacion = $this->fila('SELECT activa, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE', [$id]);
+        // FOR UPDATE OF: se bloquean solo las filas de Adopciones (publicación y adopción). Las de
+        // mascota, usuario y turno se leen sin bloquear: el usuario de MySQL de Adopciones solo las lee.
+        return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string|array {
+            $publicacion = $this->fila(
+                'SELECT p.activa, p.rescatista_id, m.nombre AS mascota FROM publicacion p
+                 JOIN mascota m ON m.id = p.mascota_id WHERE p.id = ? FOR UPDATE OF p',
+                [$id]
+            );
 
             if ($publicacion === null || (int) $publicacion['rescatista_id'] !== $rescatistaId) {
                 return 'NO_EXISTE';
@@ -419,15 +429,47 @@ class AdopcionRepositorio
                 return 'INACTIVA';
             }
 
-            $adopcion = $this->fila('SELECT id, estado FROM adopcion WHERE publicacion_id = ? FOR UPDATE', [$id]);
+            $baja = [
+                'estado' => null, 'mascota' => $publicacion['mascota'], 'postulantes' => [],
+                'adoptante_id' => null, 'adoptante' => null, 'turno' => null,
+            ];
 
-            if ($adopcion !== null && !in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
-                $this->cerrarCancelada((int) $adopcion['id'], $id, $ahora);
-            } else {
+            $adopcion = $this->fila(
+                'SELECT a.id, a.estado, a.adoptante_id, ad.nombre AS adoptante,
+                        t.id AS turno_id, t.fecha AS turno_fecha, t.hora AS turno_hora, t.estado AS turno_estado
+                 FROM adopcion a
+                 LEFT JOIN usuario ad ON ad.id = a.adoptante_id
+                 LEFT JOIN turno t ON t.id = a.turno_chequeo_id
+                 WHERE a.publicacion_id = ? FOR UPDATE OF a',
+                [$id]
+            );
+
+            if ($adopcion === null || in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
                 $this->ejecutar('UPDATE publicacion SET activa = 0 WHERE id = ?', [$id]);
+                return $baja;
             }
 
-            return 'OK';
+            $baja['estado'] = $adopcion['estado'];
+            $baja['postulantes'] = array_map('intval', array_column($this->filas(
+                "SELECT cliente_id FROM postulacion WHERE adopcion_id = ? AND estado = 'PENDIENTE' ORDER BY id",
+                [(int) $adopcion['id']]
+            ), 'cliente_id'));
+
+            if ($adopcion['adoptante_id'] !== null) {
+                $baja['adoptante_id'] = (int) $adopcion['adoptante_id'];
+                $baja['adoptante'] = $adopcion['adoptante'];
+            }
+
+            if ($adopcion['turno_id'] !== null) {
+                $baja['turno'] = [
+                    'id' => (int) $adopcion['turno_id'], 'fecha' => $adopcion['turno_fecha'],
+                    'hora' => substr((string) $adopcion['turno_hora'], 0, 5), 'estado' => $adopcion['turno_estado'],
+                ];
+            }
+
+            $this->cerrarCancelada((int) $adopcion['id'], $id, $ahora);
+
+            return $baja;
         });
     }
 
@@ -768,33 +810,8 @@ class AdopcionRepositorio
         });
     }
 
-    // Cancela la adopción (el rescatista dueño o la veterinaria: $rescatistaId null).
-    // Devuelve OK, NO_EXISTE o ESTADO.
-    public function cancelar(int $adopcionId, ?int $rescatistaId, string $ahora): string
-    {
-        return $this->enTransaccion(function () use ($adopcionId, $rescatistaId, $ahora): string {
-            $adopcion = $this->fila(
-                'SELECT a.estado, a.publicacion_id, p.rescatista_id FROM adopcion a
-                 JOIN publicacion p ON p.id = a.publicacion_id WHERE a.id = ? FOR UPDATE',
-                [$adopcionId]
-            );
-
-            if ($adopcion === null || ($rescatistaId !== null && (int) $adopcion['rescatista_id'] !== $rescatistaId)) {
-                return 'NO_EXISTE';
-            }
-
-            if (in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
-                return 'ESTADO';
-            }
-
-            $this->cerrarCancelada($adopcionId, (int) $adopcion['publicacion_id'], $ahora);
-
-            return 'OK';
-        });
-    }
-
-    // La adopción CANCELADA, la publicación cerrada y las postulaciones abiertas rechazadas
-    // (dentro de la transacción de quien la llama).
+    // La adopción CANCELADA (al dar de baja la publicación), la publicación cerrada y las postulaciones
+    // abiertas rechazadas.
     private function cerrarCancelada(int $adopcionId, int $publicacionId, string $ahora): void
     {
         $this->ejecutar("UPDATE adopcion SET estado = 'CANCELADA', fecha_fin = ? WHERE id = ?", [$ahora, $adopcionId]);

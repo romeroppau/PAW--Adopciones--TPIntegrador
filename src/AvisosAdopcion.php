@@ -120,6 +120,62 @@ class AvisosAdopcion
         );
     }
 
+    // La rescatista da de baja la publicación (contrato-adopciones.md, "Dar de baja"). $baja es lo que
+    // devuelve AdopcionRepositorio::darDeBaja; $turnoCancelado, si Pacientes canceló el turno del
+    // chequeo (null si no había uno programado). Devuelve la lista de avisos:
+    //   - a cada postulante pendiente: que se dio de baja;
+    //   - al adoptante elegido (web y WhatsApp): que la adopción no sigue y, si había, que se canceló el turno;
+    //   - a cada veterinaria, si había adoptante: lo mismo, y si el turno no se pudo cancelar, que lo haga en la agenda.
+    public static function publicacionDadaDeBaja(int $publicacionId, array $baja, array $veterinarias, string $rescatista, ?bool $turnoCancelado): array
+    {
+        $mascota = $baja['mascota'];
+        $avisos = [];
+
+        foreach ($baja['postulantes'] as $clienteId) {
+            $avisos[] = self::aviso(
+                $clienteId,
+                'POSTULACION',
+                "La publicación de $mascota se dio de baja: la rescatista ya no la ofrece en adopción. ¡Gracias por postularte!",
+                "baja-$publicacionId-postulante-$clienteId"
+            );
+        }
+
+        if ($baja['adoptante_id'] === null) {
+            return $avisos;
+        }
+
+        $turno = $baja['turno'];
+        $cuando = $turno === null ? null : self::cuando($turno['fecha'], $turno['hora']);
+        $delTurno = $turnoCancelado === true ? " Se canceló tu turno del chequeo del $cuando." : '';
+
+        foreach (['WEB' => 'web', 'WHATSAPP' => 'whatsapp'] as $canal => $sufijo) {
+            $avisos[] = self::aviso(
+                $baja['adoptante_id'],
+                'POSTULACION',
+                "La rescatista dio de baja la publicación de $mascota, así que la adopción no sigue.$delTurno Si tenés dudas, escribinos.",
+                "baja-$publicacionId-adoptante-$sufijo",
+                $canal
+            );
+        }
+
+        $paraLaVeterinaria = match (true) {
+            $turnoCancelado === true => " Se canceló el turno del chequeo del $cuando.",
+            $turnoCancelado === false => " No se pudo cancelar el turno del chequeo del $cuando: cancelalo en la agenda.",
+            default => '',
+        };
+
+        foreach ($veterinarias as $veterinariaId) {
+            $avisos[] = self::aviso(
+                $veterinariaId,
+                'POSTULACION',
+                "$rescatista dio de baja la publicación de $mascota: la adopción con {$baja['adoptante']} no sigue.$paraLaVeterinaria",
+                "baja-$publicacionId-veterinaria-$veterinariaId"
+            );
+        }
+
+        return $avisos;
+    }
+
     // Manda el aviso. Nunca corta la acción: si falla, queda en el log y devuelve false.
     public static function enviar(array $aviso): bool
     {

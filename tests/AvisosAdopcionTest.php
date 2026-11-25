@@ -126,4 +126,61 @@ final class AvisosAdopcionTest extends TestCase
             putenv("INTERNAL_TOKEN=$anterior");
         }
     }
+
+    // Dar de baja (24/11): las tres reglas.
+    private static function baja(array $extra = []): array
+    {
+        return array_merge(['estado' => null, 'mascota' => 'Kala', 'postulantes' => [], 'adoptante_id' => null, 'adoptante' => null, 'turno' => null], $extra);
+    }
+
+    public function testDarDeBajaSinPostulantesNoAvisaANadie(): void
+    {
+        $this->assertSame([], AvisosAdopcion::publicacionDadaDeBaja(30, self::baja(['estado' => 'PUBLICADA']), [101], 'Paula Herrera', null));
+    }
+
+    public function testConPostulantesSinAdoptanteLesAvisaSoloAEllos(): void
+    {
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(30, self::baja(['estado' => 'CON_POSTULANTES', 'postulantes' => [102, 103]]), [], 'Paula Herrera', null);
+
+        $this->assertSame([102, 103], array_column($avisos, 'usuario_id'));
+        $this->assertSame('baja-30-postulante-102', $avisos[0]['id_operacion']);
+        $this->assertStringContainsString('La publicación de Kala se dio de baja', $avisos[0]['mensaje']);
+    }
+
+    public function testConAdoptanteYChequeoAvisaAlAdoptanteYALaVeterinariaConElTurnoCancelado(): void
+    {
+        $baja = self::baja([
+            'estado' => 'CHEQUEO_PENDIENTE', 'adoptante_id' => 103, 'adoptante' => 'Gabriela Flores',
+            'turno' => ['id' => 9, 'fecha' => '2026-11-26', 'hora' => '19:30', 'estado' => 'PROGRAMADO'],
+        ]);
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(30, $baja, [101], 'Paula Herrera', true);
+
+        // Al adoptante, por la web y por WhatsApp; a la veterinaria, por la web.
+        $this->assertSame([103, 103, 101], array_column($avisos, 'usuario_id'));
+        $this->assertSame(['WEB', 'WHATSAPP', 'WEB'], array_column($avisos, 'canal'));
+        $this->assertStringContainsString('la adopción no sigue. Se canceló tu turno del chequeo del jueves 26/11 a las 19:30.', $avisos[0]['mensaje']);
+        $this->assertSame('Paula Herrera dio de baja la publicación de Kala: la adopción con Gabriela Flores no sigue. Se canceló el turno del chequeo del jueves 26/11 a las 19:30.', $avisos[2]['mensaje']);
+    }
+
+    public function testSiNoSePudoCancelarElTurnoLaVeterinariaLoTieneQueHacerEnLaAgenda(): void
+    {
+        $baja = self::baja([
+            'estado' => 'CHEQUEO_PENDIENTE', 'adoptante_id' => 103, 'adoptante' => 'Gabriela Flores',
+            'turno' => ['id' => 9, 'fecha' => '2026-11-26', 'hora' => '19:30', 'estado' => 'PROGRAMADO'],
+        ]);
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(30, $baja, [101], 'Paula Herrera', false);
+
+        $this->assertStringNotContainsString('turno', $avisos[0]['mensaje']);
+        $this->assertStringContainsString('No se pudo cancelar el turno del chequeo del jueves 26/11 a las 19:30: cancelalo en la agenda.', $avisos[2]['mensaje']);
+    }
+
+    public function testConAdoptanteElegidoSinTurnoNoHablaDelTurno(): void
+    {
+        $baja = self::baja(['estado' => 'ADOPTANTE_ELEGIDO', 'adoptante_id' => 103, 'adoptante' => 'Gabriela Flores']);
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(30, $baja, [101], 'Paula Herrera', null);
+
+        $this->assertCount(3, $avisos);
+        $this->assertStringNotContainsString('turno', $avisos[0]['mensaje']);
+        $this->assertStringEndsWith('la adopción con Gabriela Flores no sigue.', $avisos[2]['mensaje']);
+    }
 }
