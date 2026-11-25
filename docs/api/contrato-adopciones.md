@@ -57,25 +57,40 @@ Una mascota tiene **una sola publicación abierta** (activa y no rechazada): la 
 PUBLICADA ──(1.ª postulación)──► CON_POSTULANTES ──(elegir)──► ADOPTANTE_ELEGIDO
     ──(chequeo)──► CHEQUEO_PENDIENTE ──(completar, con el chequeo ATENDIDO)──► FINALIZADA
 
-Cualquier estado antes de FINALIZADA ──(cancelar)──► CANCELADA
+Cualquier estado antes de FINALIZADA ──(la rescatista da de baja la publicación)──► CANCELADA
 ```
 
-**Postulación:** `PENDIENTE` → `ELEGIDA` o `RECHAZADA`. Al elegir una, las demás de esa adopción
-quedan `RECHAZADA` en la misma transacción. Un cliente se postula una sola vez por adopción.
+**Postulación:** `PENDIENTE` → `ELEGIDA`, `RECHAZADA` o `CANCELADA`. Al elegir una, las demás de esa
+adopción quedan `RECHAZADA` en la misma transacción ("No elegida" en las pantallas). Al darse de baja
+la publicación, las abiertas (también la elegida) quedan `RECHAZADA` y la adopción `CANCELADA`
+("Publicación dada de baja" en las pantallas). `CANCELADA` (24/11, migración 021):
+la canceló el cliente mientras estaba `PENDIENTE` ("cancelada por el postulante"). Un cliente tiene
+una sola postulación por adopción; si la canceló, puede volver a postularse: esa misma postulación
+vuelve a `PENDIENTE` con los datos nuevos y la fecha de ese momento.
 
 ---
 
 ## 1. Validación de rescatistas (Backend)
 
 ### Listar rescatistas
-`GET /api/rescatistas` — Veterinario. Parámetro opcional `estado`: `PENDIENTE` (por defecto),
-`APROBADO`, `RECHAZADO` o `TODOS`. Ordenados por id (los más viejos primero, hasta 100).
-- 200: `{"rescatistas": [{"id": 105, "nombre": "Rescatista Pendiente", "email": "rescatista2@prueba.huellavet", "telefono": "1155550105", "organizacion": "Patitas al Rescate", "estado_validacion": "PENDIENTE"}]}`
-- 400: `estado` no es uno de los cuatro.
+`GET /api/rescatistas` — Veterinario. Parámetros opcionales: `estado` (`PENDIENTE` por defecto,
+`APROBADO`, `RECHAZADO` o `TODOS`), `buscar` (nombre, email u organización) y `desde`/`hasta`
+(`AAAA-MM-DD`, el día en que se lo validó). Los pendientes, los más viejos primero; los aprobados y
+rechazados, los validados más recientemente primero (hasta 100).
+- 200: `{"rescatistas": [{"id": 105, "nombre": "Rescatista Pendiente", "email": "rescatista2@prueba.huellavet", "telefono": "1155550105", "organizacion": "Patitas al Rescate", "estado_validacion": "PENDIENTE", "validado_en": null, "motivo_rechazo": null}]}`
+- 400: `estado` no es uno de los cuatro, o un filtro no es válido.
+
+### Perfil de un rescatista
+`GET /api/rescatistas/{id}` — Veterinario. `{"rescatista": { ... }}` (la misma forma). Sus
+publicaciones: `GET /api/adopciones/moderacion?estado=TODAS&rescatista_id={id}`; sus rechazos:
+`GET /api/adopciones/rechazos?rescatista_id={id}`.
 
 ### Aprobar o rechazar
-`POST /api/rescatistas/{id}/aprobar` y `POST /api/rescatistas/{id}/rechazar` — Veterinario. Sin cuerpo.
+`POST /api/rescatistas/{id}/aprobar` (sin cuerpo) y `POST /api/rescatistas/{id}/rechazar`
+(`{"motivo": "..."}`, de 3 a 255 caracteres; lo recibe el rescatista en el aviso) — Veterinario.
+Se guarda la fecha y hora (`validado_en`) y quién lo decidió (migración 022 del Gateway).
 - 200: `{"rescatista": { ... }}` con el estado nuevo.
+- 400: falta el motivo al rechazar, o es muy corto o muy largo.
 - 404: no existe o no es un rescatista.
 - 409: no está `PENDIENTE` (`"El rescatista ya fue aprobado"` o `"… rechazado"`).
 
@@ -121,7 +136,9 @@ deja de mostrar esa publicación (filtra por `mascota.activo`) y no deja aprobar
   "adopcion": { "id": 101, "estado": "CON_POSTULANTES" }
 }
 ```
-`adopcion` es `null` mientras la publicación no se aprobó. La foto no viaja en la publicación: se pide
+`adopcion` es `null` mientras la publicación no se aprobó; `aprobada_en` es cuándo se aprobó (`null`
+si no). En las listas de la veterinaria (`/api/adopciones/moderacion`) suma `veces_rechazada`: cuántas
+veces se rechazó, según el historial. La foto no viaja en la publicación: se pide
 aparte. Para el rescatista y la veterinaria, `adopcion` suma `postulaciones_pendientes` (cantidad).
 
 ### Animales disponibles
@@ -132,7 +149,7 @@ Parámetro opcional `especie`: `PERRO`, `GATO` u `OTRO`.
 - 400: `especie` no es válida.
 
 ### Ver una publicación
-`GET /api/adopciones/publicaciones/{id}` — Público, si está en "Animales disponibles". El rescatista
+`GET /api/adopciones/publicaciones/{id}` — Público, si está en "Animales disponibles". También la ve el cliente que se postuló a su adopción, aunque ya no esté disponible (la abre desde "Mis postulaciones"; Entrega 5). El rescatista
 que la cargó y la veterinaria la ven en cualquier estado.
 - 200: `{"publicacion": { ... }}`
 - 404: no existe, o no está disponible para quien la pide.
@@ -175,9 +192,17 @@ pasa otra vez por la moderación; una aprobada sigue aprobada.
 - 409: ya no está activa; o estaba rechazada y la mascota ya tiene otra publicación abierta.
 
 ### Dar de baja
-`DELETE /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Baja lógica (`activa = false`). Si
-tenía una adopción en curso, se cancela igual que con "Cancelar" (las postulaciones abiertas quedan
-rechazadas). La mascota sigue a cargo del rescatista y la puede volver a publicar.
+`DELETE /api/adopciones/publicaciones/{id}` — Rescatista, la suya. Es **la única forma de cortar una
+adopción en curso** (desde el 24/11 no hay "Cancelar", ni para la rescatista ni para la veterinaria).
+Baja lógica (`activa = false`): los clientes ya no la ven, pero queda guardada ("Dadas de baja" en
+Mis publicaciones). La mascota sigue a cargo del rescatista y la puede volver a publicar.
+
+| La publicación… | Además de ocultarla |
+|---|---|
+| no se aprobó, o no tiene postulantes | nada |
+| tiene postulantes, sin adoptante elegido | la adopción queda `CANCELADA`, las postulaciones `RECHAZADA`, y cada postulante pendiente recibe un aviso |
+| tiene adoptante elegido (o el chequeo pendiente) | lo mismo; si el turno del chequeo sigue `PROGRAMADO`, Adopciones lo cancela en Pacientes (sección 7) y se avisa al adoptante (campana y WhatsApp) y a cada veterinaria. Si Pacientes no responde, la baja se hace igual y el aviso le pide a la veterinaria que lo cancele en la agenda |
+
 - 204: sin cuerpo.
 - 404: no existe o es de otro rescatista.
 - 409: ya no está activa (dada de baja, o su adopción ya terminó).
@@ -186,10 +211,40 @@ rechazadas). La mascota sigue a cargo del rescatista y la puede volver a publica
 
 ## 4. Moderación (Adopciones, veterinaria)
 
-### Publicaciones por moderar
-`GET /api/adopciones/moderacion` — Veterinario. Las publicaciones `PENDIENTE` y activas, de la más
-vieja a la más nueva.
+### Publicaciones por moderar, aprobadas y de un rescatista
+`GET /api/adopciones/moderacion` — Veterinario. Parámetros opcionales:
+- `estado`: `PENDIENTE` (por defecto: las pendientes y activas, de la más vieja a la más nueva),
+  `APROBADA` (las aprobadas, las aprobadas más recientemente primero) o `TODAS` (también las dadas de
+  baja y las rechazadas, las más nuevas primero: el perfil del rescatista).
+- `buscar`: mascota, rescatista, organización o título (hasta 60 caracteres).
+- `desde`/`hasta` (`AAAA-MM-DD`, inclusive): el día en que se publicó (`PENDIENTE`, `TODAS`) o se aprobó (`APROBADA`).
+- `rescatista_id`: solo las de ese rescatista.
+
+Hasta 100.
 - 200: `{"publicaciones": [ ... ]}`
+- 400: `{"error": "Los filtros no son válidos", "campos": { ... }}`.
+
+### Historial de rechazos
+`GET /api/adopciones/rechazos` — Veterinario. Cada rechazo de una publicación, los más nuevos
+primero, aunque después la hayan corregido y aprobado (tabla `publicacion_rechazo`, migración 023).
+Filtros opcionales: `buscar` (mascota, rescatista, organización, título o motivo), `desde`/`hasta` (el
+día del rechazo) y `rescatista_id`. Hasta 100.
+- 200:
+```json
+{"rechazos": [{
+  "id": 3, "motivo": "La foto no se ve bien", "rechazada_en": "2026-11-24 10:35:12",
+  "veterinaria": "Dra. Laura Martínez",
+  "publicacion": { "id": 101, "titulo": "Pipa busca familia", "estado_moderacion": "APROBADA", "activa": false, "adopcion_estado": "FINALIZADA" },
+  "mascota": { "id": 902, "nombre": "Pipa", "especie": "GATO" },
+  "rescatista": { "id": 104, "nombre": "Rescatista Aprobada", "organizacion": "Refugio Huellitas" }
+}]}
+```
+`veterinaria` es `null` en los rechazos de antes de la migración 023 (se pasaron al historial con la
+fecha en que se publicó). `publicacion.estado_moderacion` es cómo está ahora, y `adopcion_estado`, en
+qué quedó su adopción si después se aprobó (`null` si no se aprobó). Una publicación inactiva con la
+adopción `FINALIZADA` o `CANCELADA` se cerró con la adopción; inactiva y sin adopción, la dio de baja
+la rescatista.
+- 400: como en la moderación.
 
 ### Aprobar
 `POST /api/adopciones/publicaciones/{id}/aprobar` — Veterinario. Sin cuerpo. En una transacción:
@@ -201,6 +256,7 @@ la publicación queda `APROBADA` y se crea su adopción en `PUBLICADA`.
 ### Rechazar
 `POST /api/adopciones/publicaciones/{id}/rechazar` — Veterinario. `{"motivo": "La foto no se ve bien"}`
 (de 3 a 255 caracteres). El rescatista lo ve en "Mis publicaciones" y puede editarla para que vuelva a la moderación.
+Cada rechazo queda además en el historial, con la fecha y hora y la veterinaria.
 - 200: `{"publicacion": { ... }}` en `RECHAZADA`.
 - 400: falta el motivo o es muy largo.
 - 404 / 409: igual que al aprobar.
@@ -222,7 +278,8 @@ La primera postulación pasa la adopción de `PUBLICADA` a `CON_POSTULANTES`.
 - 201: `{"postulacion": { ... }}` en `PENDIENTE`.
 - 400: datos inválidos.
 - 404: la adopción no existe o su publicación no está disponible.
-- 409: ya se postuló a esta adopción, o la adopción no está `PUBLICADA` ni `CON_POSTULANTES`.
+- 409: ya se postuló a esta adopción (y no la canceló), o la adopción no está `PUBLICADA` ni `CON_POSTULANTES`.
+- Si había cancelado su postulación, vuelve a `PENDIENTE` (201, con el mismo `id`).
 
 ### Forma de la postulación
 
@@ -245,6 +302,15 @@ La primera postulación pasa la adopción de `PUBLICADA` a `CON_POSTULANTES`.
 En la postulación `ELEGIDA`, `adopcion.turno_chequeo` trae el turno del chequeo cuando ya está
 asignado: `{"fecha": "2026-11-26", "hora": "10:00", "estado": "PROGRAMADO"}` (si no, `null`). Con
 `adopcion.estado` el cliente ve en qué paso está: esperando el turno, con turno, adoptado o cancelada.
+
+### Cancelar mi postulación
+`POST /api/adopciones/postulaciones/{id}/cancelar` — Cliente (con CSRF). `{id}` es la postulación.
+Solo la suya y mientras está `PENDIENTE`. Queda `CANCELADA`; si era la única pendiente, la adopción
+vuelve de `CON_POSTULANTES` a `PUBLICADA`. Se le avisa a la rescatista. Puede volver a postularse
+mientras la adopción siga recibiendo postulaciones.
+- 200: `{"postulacion": { ... }}` en `CANCELADA`.
+- 404: no existe o es de otro cliente.
+- 409: ya no está `PENDIENTE` (la rescatista eligió, o ya se canceló).
 
 ### Postulantes de una adopción
 `GET /api/adopciones/{id}/postulaciones` — El rescatista de la publicación o la veterinaria.
@@ -327,15 +393,6 @@ mascota de la publicación y `motivo: "CHEQUEO_ADOPCION"` (`contrato-mascotas-tu
 **Reintentar es seguro:** si el paso 3 falla después de transferir, el próximo intento vuelve a pedir
 la transferencia, Pacientes responde que ya estaba hecha y se completa el paso 3.
 
-### Cancelar
-`POST /api/adopciones/{id}/cancelar` — El rescatista de la publicación o la veterinaria. Sin cuerpo.
-En una transacción: la adopción queda `CANCELADA` con `fecha_fin`, la publicación `activa = false` y
-las postulaciones `PENDIENTE` o `ELEGIDA`, `RECHAZADA`. La mascota sigue a cargo del rescatista, que
-puede volver a publicarla. Si había un chequeo programado, la veterinaria lo cancela en la agenda.
-- 200: `{"adopcion": { ... }}`
-- 404: no existe, o es de otro rescatista.
-- 409: ya está `FINALIZADA` o `CANCELADA`.
-
 ---
 
 ## 7. Transferir la mascota (Pacientes, interno)
@@ -376,6 +433,19 @@ mismos datos encuentra la mascota en manos del nuevo dueño y responde `transfer
 Adopciones lo llama con `PACIENTES_URL=http://127.0.0.1:9003` e `INTERNAL_TOKEN`, con un tiempo
 máximo de 5 segundos.
 
+### Cancelar el turno del chequeo (24/11)
+
+`POST http://127.0.0.1:9003/internal/turnos/{id}/cancelar-chequeo`, con el mismo header. Sin cuerpo.
+Adopciones lo llama cuando la rescatista da de baja una publicación con el chequeo programado.
+
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{"cancelado": true, "estado": "CANCELADO"}` | Estaba `PROGRAMADO` y se canceló |
+| `200` | `{"cancelado": false, "estado": "ATENDIDO"}` | Ya no estaba programado (atendido, cancelado o ausente): no se toca. Repetirlo es seguro |
+| `401` | `{"error": "No autorizado"}` | Falta el token o no coincide |
+| `404` | `{"error": "Turno no encontrado"}` | No existe |
+| `409` | `{"error": "El turno no es un chequeo de adopción"}` | Solo cancela turnos `CHEQUEO_ADOPCION` |
+
 ---
 
 ## 8. Avisos
@@ -392,10 +462,14 @@ tiempo máximo de 3 segundos.
 | La rescatista publica un animal | Cada veterinaria | `POSTULACION` | `publicacion-nueva-{publicacion}-vet-{veterinaria}` |
 | La veterinaria aprueba la publicación | Rescatista | `POSTULACION` | `publicacion-{publicacion}-aprobada` |
 | La veterinaria rechaza la publicación (con el motivo) | Rescatista | `POSTULACION` | `publicacion-{publicacion}-rechazada-{AAAAMMDDHHMMSS}` |
-| Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` |
+| Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` (si vuelve a postularse después de cancelar, con `-{AAAAMMDDHHMMSS}`) |
+| El cliente cancela su postulación | Rescatista | `POSTULACION` | `postulacion-cancelada-{postulacion}-{AAAAMMDDHHMMSS}` |
 | El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
 | La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
 | Se completa la adopción | Adoptante | `CONTROL_ADOPCION` | `adopcion-finalizada-{adopcion}` |
+| La rescatista da de baja una publicación con postulantes | Cada postulante pendiente | `POSTULACION` | `baja-{publicacion}-postulante-{cliente}` |
+| La rescatista da de baja una publicación con adoptante elegido | Adoptante, por campana y WhatsApp (dice si se canceló su turno) | `POSTULACION` | `baja-{publicacion}-adoptante-{web\|whatsapp}` |
+| Lo mismo | Cada veterinaria (dice si se canceló el turno o si tiene que cancelarlo en la agenda) | `POSTULACION` | `baja-{publicacion}-veterinaria-{veterinaria}` |
 
 Los controles de los 30 y 90 días los manda el motor (rol 4), leyendo `adopcion.fecha_fin` de las
 adopciones `FINALIZADA` (`control-{adopcion}-{30|90}`). Si Backend no responde, la acción del

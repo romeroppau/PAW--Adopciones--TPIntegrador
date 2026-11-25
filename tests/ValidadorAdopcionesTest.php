@@ -141,4 +141,54 @@ final class ValidadorAdopcionesTest extends TestCase
         $this->assertSame([], $errores);
         $this->assertArrayNotHasKey('orden', $pedido['filtros']);
     }
+
+    // GET /api/adopciones/moderacion y /api/adopciones/rechazos
+    public function testListadoDePublicacionesUsaElPrimerEstadoPorDefecto(): void
+    {
+        $estados = ['PENDIENTE', 'APROBADA', 'TODAS'];
+
+        $this->assertSame([['estado' => 'PENDIENTE', 'filtros' => []], []], ValidadorAdopciones::listadoPublicaciones([], $estados));
+        $this->assertSame('APROBADA', ValidadorAdopciones::listadoPublicaciones(['estado' => 'APROBADA'], $estados)[0]['estado']);
+        $this->assertArrayHasKey('estado', ValidadorAdopciones::listadoPublicaciones(['estado' => 'RECHAZADA'], $estados)[1]);
+        // Sin lista de estados (rechazos), no hay estado.
+        $this->assertNull(ValidadorAdopciones::listadoPublicaciones(['estado' => 'X'])[0]['estado']);
+    }
+
+    public function testListadoDePublicacionesFiltra(): void
+    {
+        [$pedido, $errores] = ValidadorAdopciones::listadoPublicaciones(
+            ['buscar' => ' Rocco ', 'desde' => '2026-11-01', 'hasta' => '2026-11-24', 'rescatista_id' => '109']
+        );
+
+        $this->assertSame([], $errores);
+        $this->assertSame(['desde' => '2026-11-01', 'hasta' => '2026-11-24', 'buscar' => 'Rocco', 'rescatista_id' => 109], $pedido['filtros']);
+    }
+
+    public function testListadoDePublicacionesRechazaFiltrosInvalidos(): void
+    {
+        $this->assertArrayHasKey('rescatista_id', ValidadorAdopciones::listadoPublicaciones(['rescatista_id' => 'abc'])[1]);
+        $this->assertArrayHasKey('rescatista_id', ValidadorAdopciones::listadoPublicaciones(['rescatista_id' => '0'])[1]);
+        $this->assertArrayHasKey('rescatista_id', ValidadorAdopciones::listadoPublicaciones(['rescatista_id' => ['1']])[1]);
+        $this->assertArrayHasKey('desde', ValidadorAdopciones::listadoPublicaciones(['desde' => '2026-02-30'])[1]);
+        $this->assertArrayHasKey('hasta', ValidadorAdopciones::listadoPublicaciones(['desde' => '2026-11-24', 'hasta' => '2026-11-01'])[1]);
+        $this->assertArrayHasKey('buscar', ValidadorAdopciones::listadoPublicaciones(['buscar' => str_repeat('a', 61)])[1]);
+    }
+
+    public function testElFormatoDelRechazo(): void
+    {
+        $rechazo = AdopcionRepositorio::formatoRechazo([
+            'id' => '3', 'motivo' => 'La foto no se ve', 'rechazada_en' => '2026-11-24 10:00:00', 'veterinaria_nombre' => null,
+            'publicacion_id' => '7', 'titulo' => 'Rocco busca familia', 'estado_moderacion' => 'APROBADA', 'activa' => '0',
+            'adopcion_estado' => 'FINALIZADA',
+            'mascota_id' => '30', 'mascota_nombre' => 'Rocco', 'especie' => 'PERRO',
+            'rescatista_id' => '109', 'rescatista_nombre' => 'Paula Herrera', 'organizacion' => null,
+        ]);
+
+        $this->assertSame(3, $rechazo['id']);
+        $this->assertSame('APROBADA', $rechazo['publicacion']['estado_moderacion']);
+        // Se aprobó y se adoptó: inactiva, pero con la adopción finalizada (no "dada de baja").
+        $this->assertFalse($rechazo['publicacion']['activa']);
+        $this->assertSame('FINALIZADA', $rechazo['publicacion']['adopcion_estado']);
+        $this->assertSame(['id' => 109, 'nombre' => 'Paula Herrera', 'organizacion' => null], $rechazo['rescatista']);
+    }
 }

@@ -100,6 +100,64 @@ class ValidadorAdopciones
             $errores['estado'] = 'No es un estado de adopción';
         }
 
+        self::fechasYBusqueda($query, $filtros, $errores);
+
+        $orden = $query['orden'] ?? '';
+        if ($orden !== '' && $orden !== null) {
+            if (in_array($orden, ['prioridad', 'recientes', 'antiguas'], true)) {
+                $filtros['orden'] = $orden;
+            } else {
+                $errores['orden'] = 'El orden puede ser prioridad, recientes o antiguas';
+            }
+        }
+
+        $pagina = self::enteroDeQuery($query, 'pagina', 1, 100000, 1, $errores);
+        $porPagina = self::enteroDeQuery($query, 'por_pagina', 1, self::POR_PAGINA_MAXIMO, self::POR_PAGINA_MAXIMO, $errores);
+
+        return [
+            ['estado' => $estado, 'filtros' => $filtros, 'pagina' => $pagina, 'por_pagina' => $porPagina],
+            $errores,
+        ];
+    }
+
+    // GET /api/adopciones/moderacion?estado=&buscar=&desde=&hasta=&rescatista_id= y
+    // GET /api/adopciones/rechazos?buscar=&desde=&hasta=&rescatista_id= (todos opcionales).
+    // $estados: los que acepta esa ruta (el primero es el de por defecto; null si no lleva estado).
+    // Devuelve [datos limpios, errores]: estado, filtros (desde, hasta, buscar, rescatista_id).
+    public static function listadoPublicaciones(array $query, ?array $estados = null): array
+    {
+        $errores = [];
+        $filtros = [];
+        $estado = null;
+
+        if ($estados !== null) {
+            $estado = $query['estado'] ?? '';
+            if ($estado === '' || $estado === null) {
+                $estado = $estados[0];
+            } elseif (!in_array($estado, $estados, true)) {
+                $errores['estado'] = 'El estado puede ser ' . implode(', ', $estados);
+                $estado = $estados[0];
+            }
+        }
+
+        self::fechasYBusqueda($query, $filtros, $errores);
+
+        $rescatista = $query['rescatista_id'] ?? '';
+        if ($rescatista !== '' && $rescatista !== null) {
+            if (is_string($rescatista) && ctype_digit($rescatista) && strlen($rescatista) <= 10
+                && self::esId((int) $rescatista)) {
+                $filtros['rescatista_id'] = (int) $rescatista;
+            } else {
+                $errores['rescatista_id'] = 'No es un rescatista válido';
+            }
+        }
+
+        return [['estado' => $estado, 'filtros' => $filtros], $errores];
+    }
+
+    // desde y hasta (AAAA-MM-DD, desde <= hasta) y buscar (hasta 60 caracteres), comunes a los listados.
+    private static function fechasYBusqueda(array $query, array &$filtros, array &$errores): void
+    {
         foreach (['desde', 'hasta'] as $campo) {
             if (!isset($query[$campo]) || $query[$campo] === '') {
                 continue;
@@ -124,23 +182,6 @@ class ValidadorAdopciones
                 $filtros['buscar'] = trim($buscar);
             }
         }
-
-        $orden = $query['orden'] ?? '';
-        if ($orden !== '' && $orden !== null) {
-            if (in_array($orden, ['prioridad', 'recientes', 'antiguas'], true)) {
-                $filtros['orden'] = $orden;
-            } else {
-                $errores['orden'] = 'El orden puede ser prioridad, recientes o antiguas';
-            }
-        }
-
-        $pagina = self::enteroDeQuery($query, 'pagina', 1, 100000, 1, $errores);
-        $porPagina = self::enteroDeQuery($query, 'por_pagina', 1, self::POR_PAGINA_MAXIMO, self::POR_PAGINA_MAXIMO, $errores);
-
-        return [
-            ['estado' => $estado, 'filtros' => $filtros, 'pagina' => $pagina, 'por_pagina' => $porPagina],
-            $errores,
-        ];
     }
 
     // {"postulacion_id": 101} o {"turno_id": 120}: un id entero de verdad, o null.

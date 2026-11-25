@@ -75,28 +75,68 @@ class AdopcionControlador
         }
 
         $repositorio = self::repositorio();
-        [$resultado, $postulacionId] = $repositorio->postularse($id, $clienteId, $datos, date('Y-m-d H:i:s'));
+        [$resultado, $postulacionId, $volvio] = $repositorio->postularse($id, $clienteId, $datos, date('Y-m-d H:i:s'));
 
         match ($resultado) {
             'NO_EXISTE' => Response::error('Adopción no encontrada', 404),
             'ESTADO' => Response::error('La adopción ya no recibe postulaciones', 409),
             'YA_POSTULADO' => Response::error('Ya te postulaste a esta adopción', 409),
-            default => self::postulado($repositorio, $postulacionId, $clienteId, $id),
+            default => self::postulado($repositorio, $postulacionId, $clienteId, $id, $volvio),
         };
     }
 
-    private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId): void
+    // POST /api/adopciones/postulaciones/{id}/cancelar — el cliente cancela su postulación PENDIENTE (24/11).
+    public static function cancelarPostulacion(array $parametros): void
     {
-        Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId)");
+        $sesion = Auth::requerirRol(['CLIENTE']);
+        Auth::verificarCsrf($sesion);
+        $clienteId = (int) $sesion['id'];
+
+        $id = ParametroRuta::entero($parametros, 'id');
+        $repositorio = self::repositorio();
+        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->cancelarPostulacion($id, $clienteId);
+
+        if ($resultado === 'NO_EXISTE') {
+            Response::error('Postulación no encontrada', 404);
+            return;
+        }
+        if ($resultado === 'ESTADO') {
+            Response::error('Solo se puede cancelar una postulación que la rescatista todavía no revisó', 409);
+            return;
+        }
+
+        Logger::info("Adopciones: el cliente $clienteId canceló la postulación $id");
+        $postulacion = $repositorio->postulacion($id);
+        $adopcion = $repositorio->adopcion((int) $postulacion['adopcion_id']);
+
+        // Aviso a la rescatista (si Backend no responde, la cancelación queda igual).
+        AvisosAdopcion::enviar(AvisosAdopcion::postulacionCancelada(
+            $id,
+            (int) $adopcion['rescatista_id'],
+            $postulacion['cliente_nombre'],
+            $postulacion['mascota_nombre'],
+            date('YmdHis')
+        ));
+
+        Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)]);
+    }
+
+    private static function postulado(AdopcionRepositorio $repositorio, int $postulacionId, int $clienteId, int $adopcionId, bool $volvio): void
+    {
+        Logger::info("Adopciones: el cliente $clienteId se postuló a la adopción $adopcionId (postulación $postulacionId"
+            . ($volvio ? ', de nuevo después de cancelar' : '') . ')');
         $postulacion = $repositorio->postulacion($postulacionId);
         $adopcion = $repositorio->adopcion($adopcionId);
 
         // Aviso a la rescatista (si Backend no responde, la postulación queda igual).
+        // Si volvió a postularse, el aviso lleva la fecha en su id_operacion (si no, Backend lo tomaría
+        // como un reintento del primero y no lo mandaría).
         AvisosAdopcion::enviar(AvisosAdopcion::postulacionNueva(
             $postulacionId,
             (int) $adopcion['rescatista_id'],
             $postulacion['cliente_nombre'],
-            $postulacion['mascota_nombre']
+            $postulacion['mascota_nombre'],
+            $volvio ? date('YmdHis') : null
         ));
 
         Response::json(['postulacion' => AdopcionRepositorio::formatoPostulacion($postulacion)], 201);
@@ -272,24 +312,6 @@ class AdopcionControlador
         ));
 
         self::responderAdopcion($repositorio, $id, 'finalizó: la mascota ' . $adopcion['mascota_id'] . ' pasó al cliente ' . $adopcion['adoptante_id']);
-    }
-
-    // POST /api/adopciones/{id}/cancelar — el rescatista de la publicación o la veterinaria.
-    public static function cancelar(array $parametros): void
-    {
-        $sesion = Auth::requerirRol(['RESCATISTA', 'VETERINARIO']);
-        Auth::verificarCsrf($sesion);
-
-        $id = ParametroRuta::entero($parametros, 'id');
-        $rescatistaId = $sesion['rol'] === 'RESCATISTA' ? (int) $sesion['id'] : null;
-        $repositorio = self::repositorio();
-        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->cancelar($id, $rescatistaId, date('Y-m-d H:i:s'));
-
-        match ($resultado) {
-            'NO_EXISTE' => Response::error('Adopción no encontrada', 404),
-            'ESTADO' => Response::error('La adopción ya terminó', 409),
-            default => self::responderAdopcion($repositorio, $id, 'se canceló (usuario ' . $sesion['id'] . ')'),
-        };
     }
 
     // La adopción, si quien pide la puede ver: la veterinaria todas, el rescatista las suyas.

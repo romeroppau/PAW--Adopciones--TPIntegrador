@@ -127,8 +127,9 @@ class PublicacionControlador
         };
     }
 
-    // DELETE /api/adopciones/publicaciones/{id} — el rescatista da de baja la suya. Si tenía una
-    // adopción en curso, se cancela. 204 sin cuerpo.
+    // DELETE /api/adopciones/publicaciones/{id} — el rescatista da de baja la suya. Es la única forma
+    // de cortar una adopción en curso: se cierra, se cancela el turno del chequeo y se avisa a los
+    // postulantes, al adoptante y a la veterinaria. 204 sin cuerpo.
     public static function darDeBaja(array $parametros): void
     {
         $sesion = Auth::requerirRol(['RESCATISTA']);
@@ -149,7 +150,40 @@ class PublicacionControlador
         }
 
         Logger::info("Adopciones: el rescatista $rescatistaId dio de baja la publicación $id");
+        self::despuesDeLaBaja(self::repositorio(), $id, $resultado);
         http_response_code(204);
+    }
+
+    // Lo que sigue a la baja (contrato-adopciones.md, "Dar de baja"): si había un chequeo programado,
+    // se cancela el turno en Pacientes; después, los avisos. Nada de esto deshace la baja si falla.
+    private static function despuesDeLaBaja(AdopcionRepositorio $repositorio, int $id, array $baja): void
+    {
+        $turnoCancelado = null;
+        $turno = $baja['turno'];
+
+        if ($turno !== null && $baja['estado'] === 'CHEQUEO_PENDIENTE' && $turno['estado'] === 'PROGRAMADO') {
+            $turnoCancelado = ClientePacientes::cancelarChequeo($turno['id']);
+            if (!$turnoCancelado) {
+                Logger::error("Adopciones: no se pudo cancelar el turno {$turno['id']} del chequeo de la publicación $id");
+            }
+        }
+
+        if ($baja['postulantes'] === [] && $baja['adoptante_id'] === null) {
+            return;
+        }
+
+        $publicacion = $repositorio->publicacion($id);
+        $avisos = AvisosAdopcion::publicacionDadaDeBaja(
+            $id,
+            $baja,
+            $baja['adoptante_id'] === null ? [] : $repositorio->veterinarias(),
+            (string) $publicacion['rescatista_nombre'],
+            $turnoCancelado
+        );
+
+        foreach ($avisos as $aviso) {
+            AvisosAdopcion::enviar($aviso);
+        }
     }
 
     private static function respuestaPublicacion(AdopcionRepositorio $repositorio, int $id, string $evento): void
@@ -165,11 +199,36 @@ class PublicacionControlador
         self::responderLista(self::repositorio()->deRescatista((int) $sesion['id']), true);
     }
 
-    // GET /api/adopciones/moderacion — veterinaria: las pendientes, las más viejas primero.
+    // GET /api/adopciones/moderacion?estado=PENDIENTE|APROBADA|TODAS&buscar=&desde=&hasta=&rescatista_id=
+    // — veterinaria. Sin estado, las pendientes (la cola de moderación), las más viejas primero.
     public static function porModerar(): void
     {
         Auth::requerirRol(['VETERINARIO']);
-        self::responderLista(self::repositorio()->porModerar(), true);
+        [$pedido, $errores] = ValidadorAdopciones::listadoPublicaciones(Request::query(), ['PENDIENTE', 'APROBADA', 'TODAS']);
+
+        if ($errores !== []) {
+            Response::error('Los filtros no son válidos', 400, $errores);
+            return;
+        }
+
+        self::responderLista(self::repositorio()->publicacionesModeradas($pedido['estado'], $pedido['filtros']), true);
+    }
+
+    // GET /api/adopciones/rechazos?buscar=&desde=&hasta=&rescatista_id= — veterinaria: el historial de
+    // rechazos de publicaciones, los más nuevos primero.
+    public static function rechazos(): void
+    {
+        Auth::requerirRol(['VETERINARIO']);
+        [$pedido, $errores] = ValidadorAdopciones::listadoPublicaciones(Request::query());
+
+        if ($errores !== []) {
+            Response::error('Los filtros no son válidos', 400, $errores);
+            return;
+        }
+
+        Response::json([
+            'rechazos' => array_map([AdopcionRepositorio::class, 'formatoRechazo'], self::repositorio()->rechazos($pedido['filtros'])),
+        ]);
     }
 
     // POST /api/adopciones/publicaciones/{id}/aprobar
@@ -202,7 +261,7 @@ class PublicacionControlador
         }
 
         $repositorio = self::repositorio();
-        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->moderar($id, $motivo, date('Y-m-d H:i:s'));
+        $resultado = $id === null ? 'NO_EXISTE' : $repositorio->moderar($id, $motivo, date('Y-m-d H:i:s'), (int) $sesion['id']);
 
         match ($resultado) {
             'NO_EXISTE' => Response::error('Publicación no encontrada', 404),
@@ -244,6 +303,12 @@ class PublicacionControlador
 
         if ($rol === 'VETERINARIO' || ($rol === 'RESCATISTA' && (int) $sesion['id'] === (int) $fila['rescatista_id'])) {
             return [$fila, true];
+        }
+
+        // El cliente que se postuló la sigue viendo aunque ya no esté disponible (la rescatista eligió
+        // adoptante, o la adopción terminó): la abre desde "Mis postulaciones".
+        if ($rol === 'CLIENTE' && self::repositorio()->clientePostulado((int) $fila['id'], (int) $sesion['id'])) {
+            return [$fila, false];
         }
 
         return AdopcionRepositorio::disponible($fila) ? [$fila, false] : null;

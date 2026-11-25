@@ -13,7 +13,7 @@ class AdopcionRepositorio
         m.activo AS mascota_activa, m.duenio_id,
         TIMESTAMPDIFF(MONTH, m.fecha_nacimiento, CURDATE()) AS edad_meses,
         r.nombre AS rescatista_nombre, r.organizacion,
-        a.id AS adopcion_id, a.estado AS adopcion_estado,
+        a.id AS adopcion_id, a.estado AS adopcion_estado, a.fecha_inicio AS aprobada_en,
         (SELECT COUNT(*) FROM postulacion po
           WHERE po.adopcion_id = a.id AND po.estado = 'PENDIENTE') AS postulaciones_pendientes";
 
@@ -82,13 +82,120 @@ class AdopcionRepositorio
         );
     }
 
-    public function porModerar(): array
+    // Las publicaciones para la veterinaria, con los filtros de ValidadorAdopciones::listadoPublicaciones.
+    //   PENDIENTE: la cola de moderación (activas y con la mascota a cargo), las más viejas primero.
+    //   APROBADA:  las aprobadas, las aprobadas más recientemente primero (aprobada_en es cuando se
+    //              creó su adopción, al aprobarla).
+    //   TODAS:     todas, también las dadas de baja (el perfil del rescatista), las más nuevas primero.
+    // desde y hasta filtran por el día en que se publicó (PENDIENTE y TODAS) o se aprobó (APROBADA).
+    // Cada una trae cuántas veces se rechazó (historial de la migración 023). Hasta 100.
+    public function publicacionesModeradas(string $estado, array $filtros): array
     {
+        $condiciones = [];
+        $parametros = [];
+
+        [$columnaFecha, $orden] = match ($estado) {
+            'PENDIENTE' => ['p.creada_en', 'p.creada_en, p.id'],
+            'APROBADA' => ['a.fecha_inicio', 'a.fecha_inicio DESC, p.id DESC'],
+            default => ['p.creada_en', 'p.creada_en DESC, p.id DESC'],
+        };
+
+        if ($estado === 'PENDIENTE') {
+            $condiciones[] = "p.estado_moderacion = 'PENDIENTE' AND p.activa = 1 AND m.activo = 1";
+        } elseif ($estado === 'APROBADA') {
+            $condiciones[] = "p.estado_moderacion = 'APROBADA'";
+        }
+
+        $this->filtrosComunes($filtros, $columnaFecha, '(m.nombre LIKE ? OR r.nombre LIKE ? OR r.organizacion LIKE ? OR p.titulo LIKE ?)', 4, $condiciones, $parametros);
+
+        $donde = $condiciones === [] ? '' : ' WHERE ' . implode(' AND ', $condiciones);
+
         return $this->filas(
-            'SELECT ' . self::COLUMNAS_PUBLICACION . self::DESDE_PUBLICACION
-            . " WHERE p.estado_moderacion = 'PENDIENTE' AND p.activa = 1 AND m.activo = 1"
-            . ' ORDER BY p.creada_en, p.id LIMIT 100'
+            'SELECT ' . self::COLUMNAS_PUBLICACION . ',
+                (SELECT COUNT(*) FROM publicacion_rechazo pr WHERE pr.publicacion_id = p.id) AS veces_rechazada'
+            . self::DESDE_PUBLICACION . $donde . " ORDER BY $orden LIMIT 100",
+            $parametros
         );
+    }
+
+    // El historial de rechazos (migración 023): uno por rechazo, aunque después la publicación se haya
+    // corregido y aprobado. Los más nuevos primero. desde y hasta, por el día del rechazo; buscar, en la
+    // mascota, el rescatista, su organización, el título y el motivo. Hasta 100.
+    public function rechazos(array $filtros): array
+    {
+        $condiciones = [];
+        $parametros = [];
+        $this->filtrosComunes(
+            $filtros,
+            'pr.rechazada_en',
+            '(m.nombre LIKE ? OR r.nombre LIKE ? OR r.organizacion LIKE ? OR p.titulo LIKE ? OR pr.motivo LIKE ?)',
+            5,
+            $condiciones,
+            $parametros
+        );
+        $donde = $condiciones === [] ? '' : ' WHERE ' . implode(' AND ', $condiciones);
+
+        return $this->filas(
+            'SELECT pr.id, pr.motivo, pr.rechazada_en, v.nombre AS veterinaria_nombre,
+                    p.id AS publicacion_id, p.titulo, p.estado_moderacion, p.activa,
+                    a.estado AS adopcion_estado,
+                    m.id AS mascota_id, m.nombre AS mascota_nombre, m.especie,
+                    r.id AS rescatista_id, r.nombre AS rescatista_nombre, r.organizacion
+             FROM publicacion_rechazo pr
+             JOIN publicacion p ON p.id = pr.publicacion_id
+             JOIN mascota m ON m.id = p.mascota_id
+             JOIN usuario r ON r.id = p.rescatista_id
+             LEFT JOIN adopcion a ON a.publicacion_id = p.id
+             LEFT JOIN usuario v ON v.id = pr.rechazada_por'
+            . $donde . ' ORDER BY pr.rechazada_en DESC, pr.id DESC LIMIT 100',
+            $parametros
+        );
+    }
+
+    // desde/hasta sobre $columnaFecha, buscar con $condicionBuscar ($veces "?") y rescatista_id.
+    private function filtrosComunes(array $filtros, string $columnaFecha, string $condicionBuscar, int $veces, array &$condiciones, array &$parametros): void
+    {
+        if (isset($filtros['desde'])) {
+            $condiciones[] = "$columnaFecha >= ?";
+            $parametros[] = $filtros['desde'];
+        }
+        if (isset($filtros['hasta'])) {
+            // Hasta el final de ese día, sin envolver la columna en DATE() (así usa el índice).
+            $condiciones[] = "$columnaFecha < ? + INTERVAL 1 DAY";
+            $parametros[] = $filtros['hasta'];
+        }
+        if (isset($filtros['buscar'])) {
+            $condiciones[] = $condicionBuscar;
+            $patron = '%' . addcslashes($filtros['buscar'], '%_\\') . '%';
+            array_push($parametros, ...array_fill(0, $veces, $patron));
+        }
+        if (isset($filtros['rescatista_id'])) {
+            $condiciones[] = 'p.rescatista_id = ?';
+            $parametros[] = $filtros['rescatista_id'];
+        }
+    }
+
+    public static function formatoRechazo(array $f): array
+    {
+        return [
+            'id' => (int) $f['id'],
+            'motivo' => $f['motivo'],
+            'rechazada_en' => $f['rechazada_en'],
+            // null en los rechazos de antes de la migración 023 (no se guardaba quién).
+            'veterinaria' => $f['veterinaria_nombre'],
+            'publicacion' => [
+                'id' => (int) $f['publicacion_id'],
+                'titulo' => $f['titulo'],
+                // Cómo está ahora: PENDIENTE si la corrigieron, APROBADA si después se aprobó.
+                'estado_moderacion' => $f['estado_moderacion'],
+                'activa' => (int) $f['activa'] === 1,
+                // Si después se aprobó, en qué quedó su adopción (FINALIZADA = adoptado). Una
+                // publicación con la adopción terminada queda inactiva, pero no "dada de baja".
+                'adopcion_estado' => $f['adopcion_estado'] ?? null,
+            ],
+            'mascota' => ['id' => (int) $f['mascota_id'], 'nombre' => $f['mascota_nombre'], 'especie' => $f['especie']],
+            'rescatista' => ['id' => (int) $f['rescatista_id'], 'nombre' => $f['rescatista_nombre'], 'organizacion' => $f['organizacion']],
+        ];
     }
 
     // Las cuentas de la veterinaria: a quiénes se avisa que hay una publicación por revisar.
@@ -108,6 +215,18 @@ class AdopcionRepositorio
         );
 
         return $filas[0] ?? null;
+    }
+
+    // Si el cliente se postuló a la adopción de esa publicación (en cualquier estado).
+    public function clientePostulado(int $publicacionId, int $clienteId): bool
+    {
+        $consulta = $this->db->prepare(
+            'SELECT 1 FROM postulacion po JOIN adopcion a ON a.id = po.adopcion_id
+             WHERE a.publicacion_id = ? AND po.cliente_id = ? LIMIT 1'
+        );
+        $consulta->execute([$publicacionId, $clienteId]);
+
+        return $consulta->fetchColumn() !== false;
     }
 
     // Si la publicación está en "Animales disponibles" (para el público).
@@ -180,9 +299,10 @@ class AdopcionRepositorio
     // Aprobar (motivo null) o rechazar una publicación PENDIENTE y activa.
     // Al aprobar se crea su adopción en PUBLICADA, en la misma transacción.
     // Devuelve OK, NO_EXISTE, NO_PENDIENTE o MASCOTA_NO_DISPONIBLE.
-    public function moderar(int $id, ?string $motivo, string $ahora): string
+    // Cada rechazo queda además en el historial (publicacion_rechazo), con la veterinaria que lo hizo.
+    public function moderar(int $id, ?string $motivo, string $ahora, ?int $veterinariaId = null): string
     {
-        return $this->enTransaccion(function () use ($id, $motivo, $ahora): string {
+        return $this->enTransaccion(function () use ($id, $motivo, $ahora, $veterinariaId): string {
             $publicacion = $this->fila(
                 'SELECT estado_moderacion, activa, mascota_id, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE',
                 [$id]
@@ -200,6 +320,10 @@ class AdopcionRepositorio
                 $this->ejecutar(
                     "UPDATE publicacion SET estado_moderacion = 'RECHAZADA', motivo_rechazo = ? WHERE id = ?",
                     [$motivo, $id]
+                );
+                $this->ejecutar(
+                    'INSERT INTO publicacion_rechazo (publicacion_id, motivo, rechazada_en, rechazada_por) VALUES (?, ?, ?, ?)',
+                    [$id, $motivo, $ahora, $veterinariaId]
                 );
                 return 'OK';
             }
@@ -280,12 +404,22 @@ class AdopcionRepositorio
         });
     }
 
-    // El rescatista da de baja su publicación (baja lógica). Si tenía una adopción en curso, se cancela
-    // igual que con "Cancelar". Devuelve OK, NO_EXISTE o INACTIVA.
-    public function darDeBaja(int $id, int $rescatistaId, string $ahora): string
+    // La rescatista da de baja su publicación activa: deja de verse. Si tenía una adopción en curso, se
+    // cierra (CANCELADA) y sus postulaciones quedan rechazadas. Es la única forma de cortar una adopción.
+    // Devuelve 'NO_EXISTE', 'INACTIVA' o, si salió bien, lo que hace falta para los avisos:
+    //   ['estado' => el de la adopción antes de la baja (null si no se había aprobado),
+    //    'mascota' => nombre, 'postulantes' => ids de los clientes con la postulación pendiente,
+    //    'adoptante_id', 'adoptante' (nombre), 'turno' => ['id', 'fecha', 'hora', 'estado'] o null]
+    public function darDeBaja(int $id, int $rescatistaId, string $ahora): string|array
     {
-        return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string {
-            $publicacion = $this->fila('SELECT activa, rescatista_id FROM publicacion WHERE id = ? FOR UPDATE', [$id]);
+        // FOR UPDATE OF: se bloquean solo las filas de Adopciones (publicación y adopción). Las de
+        // mascota, usuario y turno se leen sin bloquear: el usuario de MySQL de Adopciones solo las lee.
+        return $this->enTransaccion(function () use ($id, $rescatistaId, $ahora): string|array {
+            $publicacion = $this->fila(
+                'SELECT p.activa, p.rescatista_id, m.nombre AS mascota FROM publicacion p
+                 JOIN mascota m ON m.id = p.mascota_id WHERE p.id = ? FOR UPDATE OF p',
+                [$id]
+            );
 
             if ($publicacion === null || (int) $publicacion['rescatista_id'] !== $rescatistaId) {
                 return 'NO_EXISTE';
@@ -295,15 +429,47 @@ class AdopcionRepositorio
                 return 'INACTIVA';
             }
 
-            $adopcion = $this->fila('SELECT id, estado FROM adopcion WHERE publicacion_id = ? FOR UPDATE', [$id]);
+            $baja = [
+                'estado' => null, 'mascota' => $publicacion['mascota'], 'postulantes' => [],
+                'adoptante_id' => null, 'adoptante' => null, 'turno' => null,
+            ];
 
-            if ($adopcion !== null && !in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
-                $this->cerrarCancelada((int) $adopcion['id'], $id, $ahora);
-            } else {
+            $adopcion = $this->fila(
+                'SELECT a.id, a.estado, a.adoptante_id, ad.nombre AS adoptante,
+                        t.id AS turno_id, t.fecha AS turno_fecha, t.hora AS turno_hora, t.estado AS turno_estado
+                 FROM adopcion a
+                 LEFT JOIN usuario ad ON ad.id = a.adoptante_id
+                 LEFT JOIN turno t ON t.id = a.turno_chequeo_id
+                 WHERE a.publicacion_id = ? FOR UPDATE OF a',
+                [$id]
+            );
+
+            if ($adopcion === null || in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
                 $this->ejecutar('UPDATE publicacion SET activa = 0 WHERE id = ?', [$id]);
+                return $baja;
             }
 
-            return 'OK';
+            $baja['estado'] = $adopcion['estado'];
+            $baja['postulantes'] = array_map('intval', array_column($this->filas(
+                "SELECT cliente_id FROM postulacion WHERE adopcion_id = ? AND estado = 'PENDIENTE' ORDER BY id",
+                [(int) $adopcion['id']]
+            ), 'cliente_id'));
+
+            if ($adopcion['adoptante_id'] !== null) {
+                $baja['adoptante_id'] = (int) $adopcion['adoptante_id'];
+                $baja['adoptante'] = $adopcion['adoptante'];
+            }
+
+            if ($adopcion['turno_id'] !== null) {
+                $baja['turno'] = [
+                    'id' => (int) $adopcion['turno_id'], 'fecha' => $adopcion['turno_fecha'],
+                    'hora' => substr((string) $adopcion['turno_hora'], 0, 5), 'estado' => $adopcion['turno_estado'],
+                ];
+            }
+
+            $this->cerrarCancelada((int) $adopcion['id'], $id, $ahora);
+
+            return $baja;
         });
     }
 
@@ -400,7 +566,10 @@ class AdopcionRepositorio
         };
     }
 
-    // Devuelve [resultado, id]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
+    // Devuelve [resultado, id, volvio]: OK con el id de la postulación, NO_EXISTE, ESTADO o YA_POSTULADO.
+    // Si el cliente había cancelado su postulación a esta adopción, puede volver a postularse (24/11):
+    // la misma fila vuelve a PENDIENTE con los datos nuevos y la fecha de hoy (volvio = true). Así se
+    // mantiene una sola postulación por cliente y adopción (índice único de la migración 007).
     public function postularse(int $adopcionId, int $clienteId, array $datos, string $ahora): array
     {
         return $this->enTransaccion(function () use ($adopcionId, $clienteId, $datos, $ahora): array {
@@ -411,11 +580,33 @@ class AdopcionRepositorio
                 $publicacion === null || $publicacion['estado_moderacion'] !== 'APROBADA'
                 || (int) $publicacion['activa'] !== 1 || (int) $publicacion['mascota_activa'] !== 1
             ) {
-                return ['NO_EXISTE', null];
+                return ['NO_EXISTE', null, false];
             }
 
             if (!in_array($adopcion['estado'], ['PUBLICADA', 'CON_POSTULANTES'], true)) {
-                return ['ESTADO', null];
+                return ['ESTADO', null, false];
+            }
+
+            $anterior = $this->fila(
+                'SELECT id, estado FROM postulacion WHERE adopcion_id = ? AND cliente_id = ? FOR UPDATE',
+                [$adopcionId, $clienteId]
+            );
+            if ($anterior !== null && $anterior['estado'] !== 'CANCELADA') {
+                return ['YA_POSTULADO', null, false];
+            }
+
+            if ($anterior !== null) {
+                $id = (int) $anterior['id'];
+                $this->ejecutar(
+                    "UPDATE postulacion SET estado = 'PENDIENTE', tipo_vivienda = ?, otras_mascotas = ?,
+                       tiempo_disponible = ?, fecha = ? WHERE id = ?",
+                    [$datos['tipo_vivienda'], $datos['otras_mascotas'], $datos['tiempo_disponible'], $ahora, $id]
+                );
+                if ($adopcion['estado'] === 'PUBLICADA') {
+                    $this->ejecutar("UPDATE adopcion SET estado = 'CON_POSTULANTES' WHERE id = ?", [$adopcionId]);
+                }
+
+                return ['OK', $id, true];
             }
 
             try {
@@ -426,7 +617,7 @@ class AdopcionRepositorio
                 );
             } catch (PDOException $error) {
                 if (self::esDuplicado($error)) {
-                    return ['YA_POSTULADO', null];
+                    return ['YA_POSTULADO', null, false];
                 }
                 throw $error;
             }
@@ -437,7 +628,45 @@ class AdopcionRepositorio
                 $this->ejecutar("UPDATE adopcion SET estado = 'CON_POSTULANTES' WHERE id = ?", [$adopcionId]);
             }
 
-            return ['OK', $id];
+            return ['OK', $id, false];
+        });
+    }
+
+    // El cliente cancela su postulación (24/11): solo la suya y mientras está PENDIENTE (la rescatista
+    // todavía no eligió). Queda CANCELADA; si era la única pendiente, la adopción vuelve a PUBLICADA.
+    // Devuelve NO_EXISTE (no existe o es de otro cliente), ESTADO u OK.
+    public function cancelarPostulacion(int $postulacionId, int $clienteId): string
+    {
+        return $this->enTransaccion(function () use ($postulacionId, $clienteId): string {
+            $postulacion = $this->fila(
+                'SELECT po.estado, po.cliente_id, po.adopcion_id, a.estado AS adopcion_estado
+                 FROM postulacion po JOIN adopcion a ON a.id = po.adopcion_id
+                 WHERE po.id = ? FOR UPDATE',
+                [$postulacionId]
+            );
+
+            if ($postulacion === null || (int) $postulacion['cliente_id'] !== $clienteId) {
+                return 'NO_EXISTE';
+            }
+
+            if ($postulacion['estado'] !== 'PENDIENTE') {
+                return 'ESTADO';
+            }
+
+            $this->ejecutar("UPDATE postulacion SET estado = 'CANCELADA' WHERE id = ?", [$postulacionId]);
+
+            $quedan = $this->fila(
+                "SELECT COUNT(*) AS n FROM postulacion WHERE adopcion_id = ? AND estado = 'PENDIENTE'",
+                [$postulacion['adopcion_id']]
+            );
+            if ($postulacion['adopcion_estado'] === 'CON_POSTULANTES' && (int) $quedan['n'] === 0) {
+                $this->ejecutar(
+                    "UPDATE adopcion SET estado = 'PUBLICADA' WHERE id = ? AND estado = 'CON_POSTULANTES'",
+                    [$postulacion['adopcion_id']]
+                );
+            }
+
+            return 'OK';
         });
     }
 
@@ -581,33 +810,8 @@ class AdopcionRepositorio
         });
     }
 
-    // Cancela la adopción (el rescatista dueño o la veterinaria: $rescatistaId null).
-    // Devuelve OK, NO_EXISTE o ESTADO.
-    public function cancelar(int $adopcionId, ?int $rescatistaId, string $ahora): string
-    {
-        return $this->enTransaccion(function () use ($adopcionId, $rescatistaId, $ahora): string {
-            $adopcion = $this->fila(
-                'SELECT a.estado, a.publicacion_id, p.rescatista_id FROM adopcion a
-                 JOIN publicacion p ON p.id = a.publicacion_id WHERE a.id = ? FOR UPDATE',
-                [$adopcionId]
-            );
-
-            if ($adopcion === null || ($rescatistaId !== null && (int) $adopcion['rescatista_id'] !== $rescatistaId)) {
-                return 'NO_EXISTE';
-            }
-
-            if (in_array($adopcion['estado'], ['FINALIZADA', 'CANCELADA'], true)) {
-                return 'ESTADO';
-            }
-
-            $this->cerrarCancelada($adopcionId, (int) $adopcion['publicacion_id'], $ahora);
-
-            return 'OK';
-        });
-    }
-
-    // La adopción CANCELADA, la publicación cerrada y las postulaciones abiertas rechazadas
-    // (dentro de la transacción de quien la llama).
+    // La adopción CANCELADA (al dar de baja la publicación), la publicación cerrada y las postulaciones
+    // abiertas rechazadas.
     private function cerrarCancelada(int $adopcionId, int $publicacionId, string $ahora): void
     {
         $this->ejecutar("UPDATE adopcion SET estado = 'CANCELADA', fecha_fin = ? WHERE id = ?", [$ahora, $adopcionId]);
@@ -639,6 +843,8 @@ class AdopcionRepositorio
             'motivo_rechazo' => $f['motivo_rechazo'],
             'activa' => (int) $f['activa'] === 1,
             'creada_en' => $f['creada_en'],
+            // Cuándo la aprobó la veterinaria (se crea su adopción): null si no se aprobó.
+            'aprobada_en' => $f['aprobada_en'] ?? null,
             'mascota' => [
                 'id' => (int) $f['mascota_id'],
                 'nombre' => $f['mascota_nombre'],
@@ -653,7 +859,7 @@ class AdopcionRepositorio
                 'organizacion' => $f['organizacion'],
             ],
             'adopcion' => $adopcion,
-        ];
+        ] + (isset($f['veces_rechazada']) ? ['veces_rechazada' => (int) $f['veces_rechazada']] : []);
     }
 
     public static function formatoAdopcion(array $f): array
