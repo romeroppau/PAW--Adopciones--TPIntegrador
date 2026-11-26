@@ -73,6 +73,22 @@ class AvisosAdopcion
         );
     }
 
+    // La rescatista elige al adoptante: a cada veterinaria, para que coordine y cargue el turno del
+    // chequeo (si no, se entera recién cuando revisa las adopciones en curso). Va el WhatsApp del
+    // adoptante, si lo tiene, porque el turno se coordina por ahí. El id_operacion lleva la postulación:
+    // si la adopción vuelve a tener que elegir y elige a otro, es otro aviso.
+    public static function chequeoPorCoordinar(int $postulacionId, int $veterinariaId, string $adoptante, string $mascota, ?string $telefono): array
+    {
+        $contacto = $telefono === null || trim($telefono) === '' ? '' : " (WhatsApp $telefono)";
+
+        return self::aviso(
+            $veterinariaId,
+            'POSTULACION',
+            "Eligieron a $adoptante$contacto para adoptar a $mascota y espera el turno del chequeo. Coordinalo, cargalo en la Agenda y asignalo en Adopción → Adopciones en curso.",
+            "postulacion-elegida-$postulacionId-vet-$veterinariaId"
+        );
+    }
+
     // La veterinaria asigna el turno del chequeo (o lo reprograma): al adoptante y a la rescatista,
     // por la campana y por WhatsApp. Un aviso por persona y por canal, cada uno con su id_operacion;
     // si se reprograma, el turno nuevo tiene otro id y el aviso vuelve a salir.
@@ -189,13 +205,13 @@ class AvisosAdopcion
         return true;
     }
 
-    // "2026-11-26" y "10:00:00" → "jueves 26/11 a las 10:00".
+    // "2026-11-26" y "10:00:00" → "jueves 26/11/2026 a las 10:00".
     public static function cuando(string $fecha, string $hora): string
     {
         $dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
         $momento = strtotime($fecha . ' 12:00:00');
 
-        return $dias[(int) date('w', $momento)] . ' ' . date('d/m', $momento) . ' a las ' . substr($hora, 0, 5);
+        return $dias[(int) date('w', $momento)] . ' ' . date('d/m/Y', $momento) . ' a las ' . substr($hora, 0, 5);
     }
 
     private static function aviso(int $usuarioId, string $tipo, string $mensaje, string $idOperacion, string $canal = 'WEB'): array

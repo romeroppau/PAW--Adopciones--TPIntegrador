@@ -68,6 +68,26 @@ final class AvisosAdopcionTest extends TestCase
         $this->assertStringContainsString('Te eligieron para adoptar a Pipa', $aviso['mensaje']);
     }
 
+    public function testElegirLeAvisaACadaVeterinariaQueHayUnChequeoPorCoordinar(): void
+    {
+        $aviso = AvisosAdopcion::chequeoPorCoordinar(7, 101, 'Cliente Dos', 'Pipa', '1145678901');
+
+        $this->assertSame(101, $aviso['usuario_id']);
+        $this->assertSame('POSTULACION', $aviso['tipo']);
+        $this->assertSame('WEB', $aviso['canal']);
+        $this->assertSame('postulacion-elegida-7-vet-101', $aviso['id_operacion']);
+        $this->assertStringContainsString('Eligieron a Cliente Dos (WhatsApp 1145678901) para adoptar a Pipa', $aviso['mensaje']);
+        $this->assertStringContainsString('turno del chequeo', $aviso['mensaje']);
+    }
+
+    public function testSiElAdoptanteNoTieneTelefonoElAvisoNoLoMenciona(): void
+    {
+        $aviso = AvisosAdopcion::chequeoPorCoordinar(7, 101, 'Cliente Dos', 'Pipa', null);
+
+        $this->assertStringContainsString('Eligieron a Cliente Dos para adoptar a Pipa', $aviso['mensaje']);
+        $this->assertStringNotContainsString('WhatsApp', $aviso['mensaje']);
+    }
+
     public function testElTurnoDelChequeoLeAvisaAlAdoptanteYALaRescatistaPorLosDosCanales(): void
     {
         $avisos = AvisosAdopcion::chequeoAsignado(101, 120, 103, 104, 'Cliente Dos', 'Pipa', '2026-11-26', '10:00:00');
@@ -82,7 +102,7 @@ final class AvisosAdopcionTest extends TestCase
         $adoptante = $porId['chequeo-101-120-adoptante-whatsapp'];
         $this->assertSame(103, $adoptante['usuario_id']);
         $this->assertSame('WHATSAPP', $adoptante['canal']);
-        $this->assertStringContainsString('chequeo de adopción de Pipa el jueves 26/11 a las 10:00', $adoptante['mensaje']);
+        $this->assertStringContainsString('chequeo de adopción de Pipa el jueves 26/11/2026 a las 10:00', $adoptante['mensaje']);
 
         $rescatista = $porId['chequeo-101-120-rescatista-web'];
         $this->assertSame(104, $rescatista['usuario_id']);
@@ -158,8 +178,8 @@ final class AvisosAdopcionTest extends TestCase
         // Al adoptante, por la web y por WhatsApp; a la veterinaria, por la web.
         $this->assertSame([103, 103, 101], array_column($avisos, 'usuario_id'));
         $this->assertSame(['WEB', 'WHATSAPP', 'WEB'], array_column($avisos, 'canal'));
-        $this->assertStringContainsString('la adopción no sigue. Se canceló tu turno del chequeo del jueves 26/11 a las 19:30.', $avisos[0]['mensaje']);
-        $this->assertSame('Paula Herrera dio de baja la publicación de Kala: la adopción con Gabriela Flores no sigue. Se canceló el turno del chequeo del jueves 26/11 a las 19:30.', $avisos[2]['mensaje']);
+        $this->assertStringContainsString('la adopción no sigue. Se canceló tu turno del chequeo del jueves 26/11/2026 a las 19:30.', $avisos[0]['mensaje']);
+        $this->assertSame('Paula Herrera dio de baja la publicación de Kala: la adopción con Gabriela Flores no sigue. Se canceló el turno del chequeo del jueves 26/11/2026 a las 19:30.', $avisos[2]['mensaje']);
     }
 
     public function testSiNoSePudoCancelarElTurnoLaVeterinariaLoTieneQueHacerEnLaAgenda(): void
@@ -171,7 +191,7 @@ final class AvisosAdopcionTest extends TestCase
         $avisos = AvisosAdopcion::publicacionDadaDeBaja(30, $baja, [101], 'Paula Herrera', false);
 
         $this->assertStringNotContainsString('turno', $avisos[0]['mensaje']);
-        $this->assertStringContainsString('No se pudo cancelar el turno del chequeo del jueves 26/11 a las 19:30: cancelalo en la agenda.', $avisos[2]['mensaje']);
+        $this->assertStringContainsString('No se pudo cancelar el turno del chequeo del jueves 26/11/2026 a las 19:30: cancelalo en la agenda.', $avisos[2]['mensaje']);
     }
 
     public function testConAdoptanteElegidoSinTurnoNoHablaDelTurno(): void
