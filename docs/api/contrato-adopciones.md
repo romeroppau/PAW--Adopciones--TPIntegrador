@@ -464,10 +464,12 @@ tiempo máximo de 3 segundos.
 | La veterinaria rechaza la publicación (con el motivo) | Rescatista | `POSTULACION` | `publicacion-{publicacion}-rechazada-{AAAAMMDDHHMMSS}` |
 | Llega una postulación | Rescatista | `POSTULACION` | `postulacion-nueva-{postulacion}` (si vuelve a postularse después de cancelar, con `-{AAAAMMDDHHMMSS}`) |
 | El cliente cancela su postulación | Rescatista | `POSTULACION` | `postulacion-cancelada-{postulacion}-{AAAAMMDDHHMMSS}` |
-| El rescatista elige al adoptante | Cliente elegido | `POSTULACION` | `postulacion-elegida-{postulacion}` |
+| El rescatista elige al adoptante | Cliente elegido, por campana y WhatsApp (27/11) | `POSTULACION` | `postulacion-elegida-{postulacion}` (campana) y `postulacion-elegida-{postulacion}-whatsapp` |
 | Lo mismo | Cada veterinaria, para que coordine y cargue el turno del chequeo (con el WhatsApp del adoptante, si lo tiene) | `POSTULACION` | `postulacion-elegida-{postulacion}-vet-{veterinaria}` |
-| La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
+| La veterinaria asigna (o reprograma) el turno del chequeo | Adoptante y rescatista, por campana y WhatsApp. Es el único aviso de ese turno: al cargarlo en la agenda, Pacientes no avisa (27/11) | `POSTULACION` | `chequeo-{adopcion}-{turno}-{adoptante\|rescatista}-{web\|whatsapp}` |
+| La veterinaria reprograma o cancela en la agenda el turno del chequeo (lo manda Pacientes, 27/11) | Adoptante y rescatista, por campana y WhatsApp | `TURNO` | `turno-{turno}-{reprogramado-{AAAAMMDDHHMMSS}\|cancelado}-{adoptante\|rescatista}-{web\|whatsapp}` |
 | Se completa la adopción | Adoptante | `CONTROL_ADOPCION` | `adopcion-finalizada-{adopcion}` |
+| Lo mismo (27/11) | Rescatista, por campana y WhatsApp | `POSTULACION` | `adopcion-finalizada-{adopcion}-rescatista-{web\|whatsapp}` |
 | La rescatista da de baja una publicación con postulantes | Cada postulante pendiente | `POSTULACION` | `baja-{publicacion}-postulante-{cliente}` |
 | La rescatista da de baja una publicación con adoptante elegido | Adoptante, por campana y WhatsApp (dice si se canceló su turno) | `POSTULACION` | `baja-{publicacion}-adoptante-{web\|whatsapp}` |
 | Lo mismo | Cada veterinaria (dice si se canceló el turno o si tiene que cancelarlo en la agenda) | `POSTULACION` | `baja-{publicacion}-veterinaria-{veterinaria}` |
