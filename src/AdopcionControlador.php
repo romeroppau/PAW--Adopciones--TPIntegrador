@@ -201,12 +201,10 @@ class AdopcionControlador
         Logger::info("Adopciones: se eligió la postulación $postulacionId en la adopción $id");
         $postulacion = $repositorio->postulacion($postulacionId);
 
-        // Aviso al cliente elegido.
-        AvisosAdopcion::enviar(AvisosAdopcion::postulacionElegida(
-            $postulacionId,
-            (int) $postulacion['cliente_id'],
-            $postulacion['mascota_nombre']
-        ));
+        // Aviso al cliente elegido (campana y WhatsApp).
+        foreach (AvisosAdopcion::postulacionElegida($postulacionId, (int) $postulacion['cliente_id'], $postulacion['mascota_nombre']) as $aviso) {
+            AvisosAdopcion::enviar($aviso);
+        }
 
         // Aviso a cada veterinaria: hay un adoptante esperando el turno del chequeo.
         foreach ($repositorio->veterinarias() as $veterinariaId) {
@@ -314,13 +312,18 @@ class AdopcionControlador
 
         $repositorio->finalizar($id, date('Y-m-d H:i:s'));
 
-        // Aviso al adoptante. Si es un reintento (otro pedido ya la finalizó), el id_operacion fijo
-        // hace que Backend no lo repita.
-        AvisosAdopcion::enviar(AvisosAdopcion::adopcionFinalizada(
+        // Avisos al adoptante y a la rescatista. Si es un reintento (otro pedido ya la finalizó), el
+        // id_operacion fijo hace que Backend no los repita.
+        $avisos = AvisosAdopcion::adopcionFinalizada(
             $id,
             (int) $adopcion['adoptante_id'],
+            (int) $adopcion['rescatista_id'],
+            (string) $adopcion['adoptante_nombre'],
             $adopcion['mascota_nombre']
-        ));
+        );
+        foreach ($avisos as $aviso) {
+            AvisosAdopcion::enviar($aviso);
+        }
 
         self::responderAdopcion($repositorio, $id, 'finalizó: la mascota ' . $adopcion['mascota_id'] . ' pasó al cliente ' . $adopcion['adoptante_id']);
     }
