@@ -62,15 +62,16 @@ class AvisosAdopcion
         );
     }
 
-    // La rescatista elige al adoptante: al cliente elegido.
+    // La rescatista elige al adoptante: al cliente elegido, por la campana y por WhatsApp (27/11).
+    // Devuelve la lista de avisos (uno por canal; el de la campana conserva su id_operacion de antes).
     public static function postulacionElegida(int $postulacionId, int $clienteId, string $mascota): array
     {
-        return self::aviso(
-            $clienteId,
-            'POSTULACION',
-            "¡Te eligieron para adoptar a $mascota! Te vamos a contactar para coordinar el chequeo en la veterinaria.",
-            "postulacion-elegida-$postulacionId"
-        );
+        $mensaje = "¡Te eligieron para adoptar a $mascota! Te vamos a contactar para coordinar el chequeo en la veterinaria.";
+
+        return [
+            self::aviso($clienteId, 'POSTULACION', $mensaje, "postulacion-elegida-$postulacionId"),
+            self::aviso($clienteId, 'POSTULACION', $mensaje, "postulacion-elegida-$postulacionId-whatsapp", 'WHATSAPP'),
+        ];
     }
 
     // La rescatista elige al adoptante: a cada veterinaria, para que coordine y cargue el turno del
@@ -125,15 +126,28 @@ class AvisosAdopcion
         return $avisos;
     }
 
-    // Se completa la adopción: al adoptante.
-    public static function adopcionFinalizada(int $adopcionId, int $adoptanteId, string $mascota): array
+    // Se completa la adopción: al adoptante (campana) y a la rescatista (campana y WhatsApp, 27/11).
+    // Devuelve la lista de avisos.
+    public static function adopcionFinalizada(int $adopcionId, int $adoptanteId, int $rescatistaId, string $adoptante, string $mascota): array
     {
-        return self::aviso(
+        $avisos = [self::aviso(
             $adoptanteId,
             'CONTROL_ADOPCION',
             "¡La adopción de $mascota está completa! Ya la tenés en Mis mascotas, con su historial. Te vamos a escribir a los 30 y a los 90 días para saber cómo está.",
             "adopcion-finalizada-$adopcionId"
-        );
+        )];
+
+        foreach (['WEB' => 'web', 'WHATSAPP' => 'whatsapp'] as $canal => $sufijo) {
+            $avisos[] = self::aviso(
+                $rescatistaId,
+                'POSTULACION',
+                "¡Se completó la adopción de $mascota! Pasó el chequeo y ya vive con $adoptante, que la tiene en Mis mascotas con su historial. ¡Gracias por rescatarla!",
+                "adopcion-finalizada-$adopcionId-rescatista-$sufijo",
+                $canal
+            );
+        }
+
+        return $avisos;
     }
 
     // La rescatista da de baja la publicación (contrato-adopciones.md, "Dar de baja"). $baja es lo que

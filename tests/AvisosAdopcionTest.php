@@ -58,14 +58,17 @@ final class AvisosAdopcionTest extends TestCase
         );
     }
 
-    public function testElegirLeAvisaAlClienteElegido(): void
+    public function testElegirLeAvisaAlClienteElegidoPorLaCampanaYPorWhatsApp(): void
     {
-        $aviso = AvisosAdopcion::postulacionElegida(7, 103, 'Pipa');
+        $avisos = AvisosAdopcion::postulacionElegida(7, 103, 'Pipa');
 
-        $this->assertSame(103, $aviso['usuario_id']);
-        $this->assertSame('POSTULACION', $aviso['tipo']);
-        $this->assertSame('postulacion-elegida-7', $aviso['id_operacion']);
-        $this->assertStringContainsString('Te eligieron para adoptar a Pipa', $aviso['mensaje']);
+        $this->assertSame([103, 103], array_column($avisos, 'usuario_id'));
+        $this->assertSame(['WEB', 'WHATSAPP'], array_column($avisos, 'canal'));
+        $this->assertSame(['postulacion-elegida-7', 'postulacion-elegida-7-whatsapp'], array_column($avisos, 'id_operacion'));
+        foreach ($avisos as $aviso) {
+            $this->assertSame('POSTULACION', $aviso['tipo']);
+            $this->assertStringContainsString('Te eligieron para adoptar a Pipa', $aviso['mensaje']);
+        }
     }
 
     public function testElegirLeAvisaACadaVeterinariaQueHayUnChequeoPorCoordinar(): void
@@ -115,13 +118,18 @@ final class AvisosAdopcionTest extends TestCase
         }
     }
 
-    public function testCompletarLeAvisaAlAdoptante(): void
+    public function testCompletarLeAvisaAlAdoptanteYALaRescatista(): void
     {
-        $aviso = AvisosAdopcion::adopcionFinalizada(101, 103, 'Pipa');
+        [$adoptante, $rescatistaWeb, $rescatistaWhatsApp] = AvisosAdopcion::adopcionFinalizada(101, 103, 104, 'Tomás Aguirre', 'Pipa');
 
-        $this->assertSame(103, $aviso['usuario_id']);
-        $this->assertSame('CONTROL_ADOPCION', $aviso['tipo']);
-        $this->assertSame('adopcion-finalizada-101', $aviso['id_operacion']);
+        $this->assertSame(103, $adoptante['usuario_id']);
+        $this->assertSame('CONTROL_ADOPCION', $adoptante['tipo']);
+        $this->assertSame('adopcion-finalizada-101', $adoptante['id_operacion']);
+
+        $this->assertSame([104, 104], [$rescatistaWeb['usuario_id'], $rescatistaWhatsApp['usuario_id']]);
+        $this->assertSame(['WEB', 'WHATSAPP'], [$rescatistaWeb['canal'], $rescatistaWhatsApp['canal']]);
+        $this->assertSame('adopcion-finalizada-101-rescatista-whatsapp', $rescatistaWhatsApp['id_operacion']);
+        $this->assertStringContainsString('¡Se completó la adopción de Pipa! Pasó el chequeo y ya vive con Tomás Aguirre', $rescatistaWeb['mensaje']);
     }
 
     public function testElAvisoCumpleLoQuePideBackend(): void
@@ -140,7 +148,7 @@ final class AvisosAdopcionTest extends TestCase
         $anterior = getenv('INTERNAL_TOKEN');
         putenv('INTERNAL_TOKEN');
 
-        $this->assertFalse(AvisosAdopcion::enviar(AvisosAdopcion::adopcionFinalizada(1, 2, 'Pipa')));
+        $this->assertFalse(AvisosAdopcion::enviar(AvisosAdopcion::adopcionFinalizada(1, 2, 3, 'Ana', 'Pipa')[0]));
 
         if ($anterior !== false) {
             putenv("INTERNAL_TOKEN=$anterior");
